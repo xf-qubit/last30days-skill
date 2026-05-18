@@ -120,6 +120,17 @@ class PlannerV3Tests(unittest.TestCase):
         )
         self.assertIn("digg", plan.subqueries[0].sources)
 
+    def test_quick_mode_preserves_explicit_requested_sources_in_fallback_plan(self):
+        plan = planner.plan_query(
+            topic="AI coding agents",
+            available_sources=["reddit", "youtube", "github"],
+            requested_sources=["reddit", "github"],
+            depth="quick",
+            provider=None,
+            model=None,
+        )
+        self.assertIn("github", plan.subqueries[0].sources)
+
     def test_default_comparison_uses_all_capable_sources(self):
         plan = planner.plan_query(
             topic="codex vs claude code",
