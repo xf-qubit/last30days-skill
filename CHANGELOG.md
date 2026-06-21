@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-06-21
+
+### Added
+
+- **Single X source with backend failover.** X is now one source backed by an ordered chain of interchangeable backends (xai, bird, xurl, xquik) with runtime failover, rather than separate sources. The key-based xquik backend reaches parity with bird, gaining the X-quality ranking and FROM/ABOUT handle lanes, so hosts that cannot supply browser cookies (OpenClaw, CI/cron, headless harnesses) get real X coverage from an xquik key alone. Handle lanes run via the first handle-capable backend in the chain even when a non-capable backend (xai/xurl) is primary. (#622)
+
 ## [3.7.1] - 2026-06-21
 
 ### Fixed
