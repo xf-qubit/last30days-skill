@@ -184,5 +184,49 @@ class TestSearchLinkedin(unittest.TestCase):
             self.assertIn("error", result)
 
 
+class TestDateRangeFiltering(unittest.TestCase):
+    def test_filters_out_posts_outside_range(self):
+        posts = [
+            {"text": "in range", "date": "2026-06-15"},
+            {"text": "too old", "date": "2026-01-01"},
+        ]
+        items = parse_linkedin_response(
+            {"posts": posts}, from_date="2026-05-27", to_date="2026-06-26"
+        )
+        self.assertEqual(1, len(items))
+        self.assertEqual("in range", items[0]["text"])
+
+    def test_keeps_all_when_none_in_range(self):
+        # Graceful fallback: SC doesn't always return a parseable date, so if
+        # the filter would drop everything, keep the unfiltered set instead
+        # of returning zero results.
+        posts = [
+            {"text": "old post", "date": "2026-01-01"},
+            {"text": "older post", "date": "2025-12-01"},
+        ]
+        items = parse_linkedin_response(
+            {"posts": posts}, from_date="2026-05-27", to_date="2026-06-26"
+        )
+        self.assertEqual(2, len(items))
+
+    def test_no_filtering_when_dates_not_provided(self):
+        posts = [{"text": "any date", "date": "2020-01-01"}]
+        items = parse_linkedin_response({"posts": posts})
+        self.assertEqual(1, len(items))
+
+    def test_posts_without_date_excluded_from_in_range_but_not_counted_as_failure(self):
+        posts = [
+            {"text": "has date in range", "date": "2026-06-15"},
+            {"text": "no date at all"},
+        ]
+        items = parse_linkedin_response(
+            {"posts": posts}, from_date="2026-05-27", to_date="2026-06-26"
+        )
+        # Only the dated, in-range post survives; the undated one isn't
+        # counted toward "in range" and gets dropped since in_range is non-empty.
+        self.assertEqual(1, len(items))
+        self.assertEqual("has date in range", items[0]["text"])
+
+
 if __name__ == "__main__":
     unittest.main()

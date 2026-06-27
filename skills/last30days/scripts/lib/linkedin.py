@@ -10,7 +10,6 @@ Requires SCRAPECREATORS_API_KEY environment variable.
 from __future__ import annotations
 
 import re
-import sys
 from typing import Any, Dict, List
 from urllib.parse import urlencode
 
@@ -115,10 +114,19 @@ def _int_field(post: dict[str, Any], *keys: str) -> int:
     return 0
 
 
-def parse_linkedin_response(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+def parse_linkedin_response(
+    result: Dict[str, Any],
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> List[Dict[str, Any]]:
     """Parse ScrapeCreators LinkedIn response into engine-compatible item dicts.
 
     Each returned dict must be normalizable by normalize._normalize_linkedin.
+
+    If from_date/to_date are given, applies the same hard date-range filter
+    used by instagram.search_and_enrich: drop items outside the window, but
+    fall back to keeping everything if the filter would otherwise empty the
+    result (SC doesn't always return a usable date per post).
     """
     posts = result.get("posts") or []
     items: List[Dict[str, Any]] = []
@@ -180,5 +188,15 @@ def parse_linkedin_response(result: Dict[str, Any]) -> List[Dict[str, Any]]:
             },
             "relevance": 0.5,
         })
+
+    if from_date and to_date:
+        in_range = [i for i in items if i["date"] and from_date <= i["date"] <= to_date]
+        out_of_range = len(items) - len(in_range)
+        if in_range:
+            items = in_range
+            if out_of_range:
+                _log(f"Filtered {out_of_range} posts outside date range")
+        elif items:
+            _log(f"No posts within date range, keeping all {len(items)}")
 
     return items

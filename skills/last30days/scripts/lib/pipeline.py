@@ -120,7 +120,7 @@ def available_sources(config: dict[str, Any], requested_sources: list[str] | Non
     # reddit_public needs no API key - always available
     available.append("reddit")
     if config.get("SCRAPECREATORS_API_KEY"):
-        available.extend(["tiktok", "instagram", "linkedin"])
+        available.extend(["tiktok", "instagram"])
     if env.get_x_source(config):
         available.append("x")
     if which("yt-dlp") or env.is_youtube_sc_available(config):
@@ -151,6 +151,15 @@ def available_sources(config: dict[str, Any], requested_sources: list[str] | Non
         "perplexity" in include_sources or (requested_sources and "perplexity" in requested_sources)
     ):
         available.append("perplexity")
+    # LinkedIn: opt-in additive source via INCLUDE_SOURCES=linkedin (same
+    # consent pattern as Perplexity). Unlike tiktok/instagram, which are
+    # offered during SKILL.md Step 0 onboarding, LinkedIn is power-user-only
+    # and must not silently activate for existing SCRAPECREATORS_API_KEY
+    # holders.
+    if config.get("SCRAPECREATORS_API_KEY") and (
+        "linkedin" in include_sources or (requested_sources and "linkedin" in requested_sources)
+    ):
+        available.append("linkedin")
     if requested_sources and "xiaohongshu" in requested_sources and env.is_xiaohongshu_available(config):
         available.append("xiaohongshu")
     if env.is_threads_available(config):
@@ -1409,7 +1418,7 @@ def _retrieve_stream(
             depth=depth,
             token=config.get("SCRAPECREATORS_API_KEY", ""),
         )
-        return linkedin.parse_linkedin_response(result), {}
+        return linkedin.parse_linkedin_response(result, from_date=from_date, to_date=to_date), {}
     if source == "hackernews":
         result = hackernews.search_hackernews(subquery.search_query, from_date, to_date, depth=depth)
         return hackernews.parse_hackernews_response(result, query=subquery.search_query), {}
