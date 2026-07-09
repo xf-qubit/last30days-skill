@@ -62,7 +62,7 @@ HTML follow-up renders also write a structured `last-report.json` cache beside `
 On the very first `/last30days` run (no `~/.config/last30days/.env`, or `SETUP_COMPLETE` not set), the skill runs a consent-driven onboarding the model drives in chat. It takes one of two forms depending on the host:
 
 - **Claude Code Modal Flow** - the restored v3.0.0 guided NUX, used on hosts with `AskUserQuestion` (Claude Code). A welcome message, then modals for Auto/Manual/Skip setup, cookie consent, the ScrapeCreators signup offer, a TikTok/Instagram `INCLUDE_SOURCES` opt-in, and a first-topic picker.
-- **Non-Modal Prose Flow** - the same work done conversationally on hosts without modals (OpenClaw, Codex, Cursor, Gemini CLI, raw CLI).
+- **Non-Modal Prose Flow** - the same work done conversationally on hosts without modals (OpenClaw, Codex, Cursor, Gemini CLI, Grok, raw CLI).
 
 Both share the same consent points:
 
@@ -416,6 +416,13 @@ The skill is built to flex around different client environments. Four patterns t
 The Codex marketplace catalog points at the repository root URL: Codex clones the repo, reads the
 root `.codex-plugin/plugin.json`, and loads skills from `./skills/`. The Agent Skills install
 command documented in the README remains the broadest cross-host path.
+
+**Grok note:** the repository includes `.grok-plugin/plugin.json` and `.grok-plugin/marketplace.json`
+so xAI's Grok Build CLI (`grok`) can install last30days as a native plugin. Grok also reads the
+Claude Code manifests for compatibility; the native pair is the first-class lane. The Grok
+marketplace catalog uses a bare Git URL source (no commit pin) so `grok plugin marketplace add
+mvanhorn/last30days-skill` tracks HEAD — the same pattern as the Codex catalog. `npx skills add`
+remains a valid cross-host fallback.
 
 ### 1. Trusted per-client `.claude/last30days.env`
 

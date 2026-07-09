@@ -152,6 +152,7 @@ The v3 foundations are all still here: the pre-research brain that resolves the 
 | Surface | Install | Updates |
 |---------|---------|---------|
 | **Claude Code** (recommended) | `/plugin marketplace add mvanhorn/last30days-skill` | Auto via marketplace, or `claude plugin update last30days@last30days-skill` |
+| **Grok** (xAI Build CLI) | `grok plugin marketplace add mvanhorn/last30days-skill` then `grok plugin install last30days` | `grok plugin update last30days` |
 | **Codex, Cursor, Copilot, Gemini CLI, or any of 50+ [Agent Skills](https://agentskills.io) hosts** | `npx skills add mvanhorn/last30days-skill -g` | `npx skills update last30days -g` |
 | **claude.ai** (web) | [Download `last30days.skill`](https://github.com/mvanhorn/last30days-skill/releases/latest/download/last30days.skill) and upload via claude.ai > Customize > Skills > + > Create skill > Upload a skill | Re-download and re-upload |
 | **Claude Desktop** | [Download the `.mcpb` for your platform](https://github.com/mvanhorn/last30days-skill/releases/latest) and drag into Settings > Extensions | Re-download and drag the new bundle in |
@@ -172,6 +173,23 @@ npx skills add mvanhorn/last30days-skill -g -a claude-code
 ```
 
 The native plugin and the `npx skills` install can coexist. Note that Claude Code does not dedupe across install methods: if you have both the marketplace plugin and the `npx skills` copy active, `/last30days` will show two entries. Use one install method per machine.
+
+### Grok (xAI Build CLI)
+
+[Grok Build](https://docs.x.ai/build/features/skills-plugins-marketplaces) (`grok`) installs last30days as a native plugin. Direct install tracks the repository:
+
+```bash
+grok plugin install mvanhorn/last30days-skill
+```
+
+Or add this repo as a marketplace source, then install by plugin name:
+
+```bash
+grok plugin marketplace add mvanhorn/last30days-skill
+grok plugin install last30days
+```
+
+Add `--trust` to skip the install confirmation. Update with `grok plugin update last30days`. Grok also reads the Claude Code manifests for compatibility; the native `.grok-plugin/` pair is the first-class lane (and what an official [xAI marketplace](https://github.com/xai-org/plugin-marketplace) listing points at). `npx skills add` remains a valid cross-host fallback.
 
 ### Codex, Cursor, Copilot, Gemini CLI, and other Agent Skills hosts
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Native Grok Build (xAI) plugin and marketplace lane: `.grok-plugin/plugin.json` + `.grok-plugin/marketplace.json` so `grok plugin install mvanhorn/last30days-skill` and `grok plugin marketplace add mvanhorn/last30days-skill` work as first-class install paths. The self-hosted catalog uses a bare Git URL source (tracks HEAD); submitting to the official `xai-org/plugin-marketplace` remains a post-merge SHA-pinned outbound PR documented in `AGENTS.md`.
+
 ## [3.11.0] - 2026-07-05
 
 ### Added

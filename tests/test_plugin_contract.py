@@ -44,6 +44,31 @@ class TestPluginContract(unittest.TestCase):
             plugin["source"],
         )
 
+    def test_grok_plugin_manifest_uses_repo_skill_root(self) -> None:
+        manifest = _json(ROOT / ".grok-plugin" / "plugin.json")
+
+        self.assertEqual("last30days", manifest["name"])
+        self.assertEqual("./skills/", manifest["skills"])
+
+    def test_grok_marketplace_points_at_repo_root_plugin(self) -> None:
+        marketplace = _json(ROOT / ".grok-plugin" / "marketplace.json")
+        plugins = marketplace.get("plugins") or []
+        plugin_by_name = {plugin["name"]: plugin for plugin in plugins}
+
+        self.assertEqual("last30days-skill", marketplace["name"])
+        self.assertIn("last30days", plugin_by_name)
+        plugin = plugin_by_name["last30days"]
+        self.assertEqual(
+            {
+                "source": "url",
+                "url": "https://github.com/mvanhorn/last30days-skill.git",
+            },
+            plugin["source"],
+        )
+        # Grok rejects self-referential local marketplace sources (path "." / "./").
+        self.assertNotEqual("local", plugin["source"].get("type"))
+        self.assertNotIn(plugin["source"].get("path"), {".", "./"})
+
     def test_versions_match_across_manifests(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         version = pyproject["project"]["version"]
@@ -51,12 +76,18 @@ class TestPluginContract(unittest.TestCase):
         self.assertEqual(version, _skill_version())
         self.assertEqual(version, _json(ROOT / ".claude-plugin" / "plugin.json")["version"])
         self.assertEqual(version, _json(ROOT / ".codex-plugin" / "plugin.json")["version"])
+        self.assertEqual(version, _json(ROOT / ".grok-plugin" / "plugin.json")["version"])
         self.assertEqual(version, _json(ROOT / "gemini-extension.json")["version"])
 
         marketplace = _json(ROOT / ".claude-plugin" / "marketplace.json")
         plugins = marketplace.get("plugins") or []
         self.assertEqual(1, len(plugins))
         self.assertEqual(version, plugins[0]["version"])
+
+        grok_marketplace = _json(ROOT / ".grok-plugin" / "marketplace.json")
+        grok_plugins = grok_marketplace.get("plugins") or []
+        self.assertEqual(1, len(grok_plugins))
+        self.assertEqual(version, grok_plugins[0]["version"])
 
     def test_claude_marketplace_has_current_schema_shape(self) -> None:
         marketplace = _json(ROOT / ".claude-plugin" / "marketplace.json")
