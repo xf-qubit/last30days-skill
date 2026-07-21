@@ -98,6 +98,16 @@ class TestSearchX(unittest.TestCase):
         self.assertIn("error", result)
         self.assertIn("timed out", result["error"])
 
+    def test_search_uses_app_only_auth(self):
+        # Regression: default (OAuth1) auth 401s on any query needing
+        # percent-encoding (xurl >=1.1 signing bug); search must pin app-only.
+        completed = mock.Mock(returncode=0, stdout=json.dumps({}))
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
+            xurl_x.search_x("claude code")
+        call_args = run_mock.call_args[0][0]
+        self.assertIn("--auth", call_args)
+        self.assertEqual(call_args[call_args.index("--auth") + 1], "app")
+
     def test_max_results_clamped_to_100(self):
         # DEPTH_CONFIG["deep"] = 60, should stay at 60 (within 10-100 range)
         completed = mock.Mock(returncode=0, stdout=json.dumps({}))

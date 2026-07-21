@@ -1,11 +1,12 @@
-"""X (Twitter) search via xurl CLI — official X API v2 with OAuth2.
+"""X (Twitter) search via xurl CLI — official X API v2.
 
-xurl is an open-source CLI for the X API (https://github.com/openclaw/xurl).
-It uses OAuth2 with PKCE and automatic token refresh, requiring only a free
+xurl is X's official CLI for the X API
+(https://github.com/xdevplatform/xurl). It requires only a free
 X Developer App. No xAI subscription or browser cookies needed.
 
-Install: npm install -g xurl
-Auth:    xurl auth oauth2 login
+Install: npm install -g @xdevplatform/xurl
+Auth:    xurl auth app-only <bearer-token>   (search)
+         xurl auth oauth1 ...                (whoami / availability check)
 
 Priority: xAI API > Bird/GraphQL > xurl > web-only fallback
 """
@@ -72,8 +73,11 @@ def search_x(
     max_results = max(10, min(100, max_results))
 
     try:
+        # --auth app (app-only bearer): xurl >=1.1 mis-signs OAuth1 requests
+        # whose query needs percent-encoding (spaces, parens, ...) -> 401.
+        # Bearer auth sends no signature, so multi-word queries work.
         result = subprocess.run(
-            ["xurl", "search", query, "-n", str(max_results)],
+            ["xurl", "search", query, "-n", str(max_results), "--auth", "app"],
             capture_output=True,
             text=True,
             timeout=30,
