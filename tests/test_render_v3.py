@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from lib import render, schema
+from lib import hiring_signals, render, schema
 
 
 def sample_report() -> schema.Report:
@@ -237,6 +237,73 @@ class RenderV3Tests(unittest.TestCase):
                 self.assertNotIn("## Best Takes", text)
                 self.assertNotIn("## Narrative Hooks", text)
                 self.assertNotIn("## Audience Questions", text)
+
+    def test_rejected_cluster_cannot_feed_auxiliary_sections(self):
+        report = sample_report()
+        rejected_item = copy.deepcopy(report.ranked_candidates[0].source_items[0])
+        rejected_item.item_id = "rejected-reddit"
+        rejected_item.url = "https://example.com/rejected"
+        rejected_item.metadata["top_comments"] = [
+            {"excerpt": "Rejected comment one must remain hidden.", "score": 99},
+            {"excerpt": "Rejected comment two must remain hidden.", "score": 98},
+        ]
+        rejected_candidate = copy.deepcopy(report.ranked_candidates[0])
+        rejected_candidate.candidate_id = "c-rejected"
+        rejected_candidate.item_id = rejected_item.item_id
+        rejected_candidate.title = "Could rejected evidence become a question?"
+        rejected_candidate.url = rejected_item.url
+        rejected_candidate.fun_score = 95
+        rejected_candidate.source_items = [rejected_item]
+
+        job_item = schema.SourceItem(
+            item_id="rejected-job",
+            source="jobs",
+            title="Rejected Strategic Engineer",
+            body="Founding enterprise security role.",
+            url="https://example.com/jobs/rejected",
+            container="Engineering",
+            published_at="2026-03-15",
+            metadata={"department": "Engineering"},
+        )
+        job_candidate = copy.deepcopy(rejected_candidate)
+        job_candidate.candidate_id = "c-rejected-job"
+        job_candidate.item_id = job_item.item_id
+        job_candidate.source = "jobs"
+        job_candidate.title = job_item.title
+        job_candidate.url = job_item.url
+        job_candidate.fun_score = None
+        job_candidate.source_items = [job_item]
+        report.ranked_candidates.extend([rejected_candidate, job_candidate])
+        report.clusters.append(schema.Cluster(
+            cluster_id="cluster-rejected",
+            title="Rejected cluster",
+            candidate_ids=["c-rejected", "c-rejected-job"],
+            representative_ids=["c-rejected"],
+            sources=["reddit", "jobs"],
+            score=0,
+        ))
+        report.artifacts["hiring_signals"] = hiring_signals.analyze(
+            [job_item],
+            explicit=True,
+            topic=report.topic,
+        )
+
+        renderers = {
+            "compact": render.render_compact,
+            "registered": lambda value: render.render_compact(
+                value,
+                register="creator",
+            ),
+            "context": render.render_context,
+            "brief": render.render_brief,
+        }
+        for name, renderer in renderers.items():
+            with self.subTest(mode=name):
+                text = renderer(report)
+                self.assertIn("Grounded result", text)
+                self.assertNotIn("Rejected comment", text)
+                self.assertNotIn("Could rejected evidence", text)
+                self.assertNotIn("Rejected Strategic Engineer", text)
 
     def test_all_report_modes_promote_qualifying_nonrepresentative(self):
         renderers = {
@@ -911,6 +978,7 @@ class RenderBriefTests(unittest.TestCase):
             source_items=[],
         )
         report.ranked_candidates.append(question_candidate)
+        report.clusters[0].candidate_ids.append("cq")
         text = render.render_brief(report)
         self.assertIn("## Audience Questions", text)
         self.assertIn("What are the best prompting tricks for Claude?", text)
@@ -945,6 +1013,7 @@ class RenderBriefTests(unittest.TestCase):
                 source_quality=0.8, rrf_score=0.01, final_score=70,
                 sources=["reddit"], source_items=[],
             ))
+            report.clusters[0].candidate_ids.append(f"cdup{i}")
         text = render.render_brief(report)
         self.assertEqual(text.count("What is the best approach?"), 1)
 

@@ -8,7 +8,16 @@ from collections import Counter
 from datetime import date
 from urllib.parse import urlparse
 
-from . import dates, health, library_index, registers, schema, signals, skill_meta
+from . import (
+    dates,
+    health,
+    hiring_signals,
+    library_index,
+    registers,
+    schema,
+    signals,
+    skill_meta,
+)
 
 
 def _skill_version() -> str:
@@ -440,6 +449,32 @@ def _candidates_in_clusters(
     ]
 
 
+def _candidates_for_auxiliary_sections(
+    report: schema.Report,
+    requested_clusters: list[schema.Cluster],
+    visible_clusters: list[schema.Cluster],
+) -> list[schema.Candidate]:
+    """Exclude rejected cluster members while preserving unclustered evidence."""
+    if requested_clusters and not visible_clusters:
+        return []
+    clustered_ids = {
+        candidate_id
+        for cluster in report.clusters
+        for candidate_id in cluster.candidate_ids
+    }
+    visible_ids = {
+        candidate_id
+        for cluster in _clusters_clearing_relevance_floor(report, report.clusters)
+        for candidate_id in cluster.candidate_ids
+    }
+    return [
+        candidate
+        for candidate in report.ranked_candidates
+        if candidate.candidate_id not in clustered_ids
+        or candidate.candidate_id in visible_ids
+    ]
+
+
 def _visible_clusters_fail_relevance_floor(
     report: schema.Report,
     clusters: list[schema.Cluster],
@@ -567,19 +602,19 @@ def _render_registered_sections(
     """Render one audience preset's ordered, budgeted evidence sections."""
 
     visible_clusters = _clusters_for_register(report, audience, cluster_limit)
-    no_solid_evidence = _visible_clusters_fail_relevance_floor(
+    solid_clusters = _clusters_clearing_relevance_floor(report, visible_clusters)
+    visible_candidates = _candidates_for_auxiliary_sections(
         report,
         visible_clusters,
+        solid_clusters,
     )
+    no_solid_evidence = bool(visible_clusters) and not solid_clusters
     if no_solid_evidence:
         best_takes: list[str] = []
         top_comments: list[str] = []
     else:
         best_takes = _render_best_takes(
-            _candidates_in_clusters(
-                report,
-                _clusters_clearing_relevance_floor(report, visible_clusters),
-            ),
+            visible_candidates,
             limit=audience.budget_for("best_takes", int(fun_params["limit"])),
             threshold=float(fun_params["threshold"]),
             vote_weight=float(fun_params.get("vote_weight", 18.0)),
@@ -594,6 +629,7 @@ def _render_registered_sections(
         top_comments = _render_top_comments(
             report,
             limit=audience.budget_for("top_comments", 8),
+            candidates=visible_candidates,
         )
         if not top_comments:
             top_comments = [
@@ -603,7 +639,14 @@ def _render_registered_sections(
             ]
 
     sections = {
-        "hiring_signals": [] if no_solid_evidence else _render_hiring_signals(report),
+        "hiring_signals": (
+            []
+            if no_solid_evidence
+            else _render_hiring_signals(
+                report,
+                candidates=None if not visible_clusters else visible_candidates,
+            )
+        ),
         "clusters": _render_ranked_clusters(
             report,
             visible_clusters,
@@ -688,14 +731,23 @@ def render_compact(
     lines.append("<!-- EVIDENCE FOR SYNTHESIS: read this, do not emit verbatim. Transform into `What I learned:` prose per LAW 2. -->")
     lines.append("")
     visible_clusters = evidence_report.clusters[:cluster_limit]
-    no_solid_evidence = _visible_clusters_fail_relevance_floor(
+    solid_clusters = _clusters_clearing_relevance_floor(
         evidence_report,
         visible_clusters,
     )
+    visible_candidates = _candidates_for_auxiliary_sections(
+        evidence_report,
+        visible_clusters,
+        solid_clusters,
+    )
+    no_solid_evidence = bool(visible_clusters) and not solid_clusters
     hiring_block = (
         []
         if no_solid_evidence
-        else _render_hiring_signals(evidence_report)
+        else _render_hiring_signals(
+            evidence_report,
+            candidates=None if not visible_clusters else visible_candidates,
+        )
     )
     if hiring_block and audience.name in {"default", "eli5"}:
         lines.extend(hiring_block)
@@ -709,13 +761,7 @@ def render_compact(
 
         if not no_solid_evidence:
             best_takes = _render_best_takes(
-                _candidates_in_clusters(
-                    evidence_report,
-                    _clusters_clearing_relevance_floor(
-                        evidence_report,
-                        visible_clusters,
-                    ),
-                ),
+                visible_candidates,
                 limit=fun_params["limit"],
                 threshold=fun_params["threshold"],
                 vote_weight=fun_params.get("vote_weight", 18.0),
@@ -723,7 +769,10 @@ def render_compact(
             if best_takes:
                 lines.extend([""] + best_takes)
 
-            top_comments = _render_top_comments(evidence_report)
+            top_comments = _render_top_comments(
+                evidence_report,
+                candidates=visible_candidates,
+            )
             if top_comments:
                 lines.extend([""] + top_comments)
 
@@ -798,7 +847,19 @@ def render_for_html(
     drill_context = _render_drill_context(report)
     if drill_context:
         lines.extend(["", *drill_context])
-    hiring_block = _render_hiring_signals(evidence_report)
+    html_clusters = _clusters_clearing_relevance_floor(
+        evidence_report,
+        evidence_report.clusters,
+    )
+    html_candidates = _candidates_for_auxiliary_sections(
+        evidence_report,
+        evidence_report.clusters,
+        html_clusters,
+    )
+    hiring_block = _render_hiring_signals(
+        evidence_report,
+        candidates=html_candidates if evidence_report.clusters else None,
+    )
     if synthesis_md:
         lines.extend(["", synthesis_md.strip()])
         if hiring_block and "## Hiring Signals" not in synthesis_md:
@@ -1399,8 +1460,13 @@ def _render_entity_evidence_block(
             out.extend(_render_candidate(candidate, prefix=f"{rep_index}.", report=evidence_report))
         out.append("")
 
+    comparison_candidates = _candidates_for_auxiliary_sections(
+        evidence_report,
+        requested_clusters,
+        visible_clusters,
+    )
     best_takes = _render_best_takes(
-        _candidates_in_clusters(evidence_report, visible_clusters),
+        comparison_candidates,
         limit=fun_params["limit"],
         threshold=fun_params["threshold"],
         vote_weight=fun_params.get("vote_weight", 18.0),
@@ -1500,14 +1566,17 @@ def render_full(report: schema.Report) -> str:
     lines.extend(_render_ranked_clusters(evidence_report, evidence_report.clusters))
 
     fun_params = _FUN_LEVELS["medium"]
+    full_clusters = _clusters_clearing_relevance_floor(
+        evidence_report,
+        evidence_report.clusters,
+    )
+    full_candidates = _candidates_for_auxiliary_sections(
+        evidence_report,
+        evidence_report.clusters,
+        full_clusters,
+    )
     best_takes = _render_best_takes(
-        _candidates_in_clusters(
-            evidence_report,
-            _clusters_clearing_relevance_floor(
-                evidence_report,
-                evidence_report.clusters,
-            ),
-        ),
+        full_candidates,
         limit=fun_params["limit"],
         threshold=fun_params["threshold"],
         vote_weight=fun_params["vote_weight"],
@@ -1639,7 +1708,19 @@ def render_context(report: schema.Report, cluster_limit: int = 6) -> str:
     freshness_warning = _assess_data_freshness(report)
     if freshness_warning:
         lines.append(f"Freshness warning: {freshness_warning}")
-    hiring_block = [] if no_solid_evidence else _render_hiring_signals(report)
+    context_candidates = _candidates_for_auxiliary_sections(
+        report,
+        requested_clusters,
+        visible_clusters,
+    )
+    hiring_block = (
+        []
+        if no_solid_evidence
+        else _render_hiring_signals(
+            report,
+            candidates=context_candidates if requested_clusters else None,
+        )
+    )
     if hiring_block:
         lines.extend(["", *hiring_block, ""])
     lines.append("Top clusters:")
@@ -1712,15 +1793,16 @@ def render_brief(report: schema.Report, cluster_limit: int = 8) -> str:
         evidence_report,
         requested_clusters,
     )
-    qualifying_candidates = (
-        []
-        if requested_clusters and not visible_clusters
-        else [
-            candidate
-            for candidate in evidence_report.ranked_candidates
-            if _best_take_relevance_ok(candidate)
-        ]
+    brief_candidates = _candidates_for_auxiliary_sections(
+        evidence_report,
+        requested_clusters,
+        visible_clusters,
     )
+    qualifying_candidates = [
+        candidate
+        for candidate in brief_candidates
+        if _best_take_relevance_ok(candidate)
+    ]
     if requested_clusters and not visible_clusters:
         lines.extend(["**Nothing solid this window.**", ""])
     for i, cluster in enumerate(visible_clusters, start=1):
@@ -1825,13 +1907,30 @@ def _extract_audience_questions(candidates: list[schema.Candidate]) -> list[str]
     return questions
 
 
-def _render_hiring_signals(report: schema.Report) -> list[str]:
+def _render_hiring_signals(
+    report: schema.Report,
+    *,
+    candidates: list[schema.Candidate] | None = None,
+) -> list[str]:
     summary = report.artifacts.get("hiring_signals")
     if not isinstance(summary, dict):
         return []
+    mode = summary.get("mode") or "standard"
+    if candidates is not None:
+        job_items: dict[str, schema.SourceItem] = {}
+        for candidate in candidates:
+            for item in candidate.source_items:
+                if item.source == "jobs":
+                    job_items[item.item_id] = item
+        if not job_items:
+            return []
+        summary = hiring_signals.analyze(
+            list(job_items.values()),
+            explicit=mode == "explicit",
+            topic=report.topic,
+        )
     signals = summary.get("signals") or []
     include = bool(summary.get("include"))
-    mode = summary.get("mode") or "standard"
     if not include and mode != "explicit":
         return []
 
@@ -2873,7 +2972,12 @@ def _render_best_takes(
     return lines
 
 
-def _render_top_comments(report, limit: int = 8) -> list[str]:
+def _render_top_comments(
+    report,
+    limit: int = 8,
+    *,
+    candidates: list[schema.Candidate] | None = None,
+) -> list[str]:
     """Vote-ranked community comments across ALL ranked candidates — not just the
     top-cluster representatives — surfaced into the EVIDENCE block so the reading
     model can weave the funniest/highest-engagement lines into the synthesis.
@@ -2888,7 +2992,8 @@ def _render_top_comments(report, limit: int = 8) -> list[str]:
     """
     seen: set[str] = set()
     scored: list[tuple[float, schema.Candidate, schema.SourceItem, dict, str]] = []
-    for cand in report.ranked_candidates:
+    candidate_pool = report.ranked_candidates if candidates is None else candidates
+    for cand in candidate_pool:
         if not _best_take_relevance_ok(cand):
             continue
         for item in cand.source_items:
