@@ -188,6 +188,27 @@ class RenderV3Tests(unittest.TestCase):
         self.assertIn("### 1. Grounded result", text)
         self.assertIn("Solid nonrepresentative evidence", text)
 
+    def test_compact_and_comparison_preserve_all_qualifying_representatives(self):
+        report = sample_report()
+        second_representative = copy.deepcopy(report.ranked_candidates[0])
+        second_representative.candidate_id = "c2"
+        second_representative.title = "Second qualifying representative"
+        second_representative.snippet = "Independent supporting evidence."
+        report.ranked_candidates.append(second_representative)
+        report.clusters[0].candidate_ids.append("c2")
+        report.clusters[0].representative_ids.append("c2")
+
+        renderers = {
+            "compact": render.render_compact,
+            "comparison": lambda value: render.render_comparison_multi(
+                [("Example", value)]
+            ),
+        }
+        for name, renderer in renderers.items():
+            with self.subTest(mode=name):
+                text = renderer(report)
+                self.assertIn("Second qualifying representative", text)
+
     def test_all_report_modes_promote_qualifying_nonrepresentative(self):
         renderers = {
             "comparison": lambda report: render.render_comparison_multi(

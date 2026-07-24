@@ -334,8 +334,9 @@ def _qualifying_representative_ids(
     candidate_by_id: dict[str, schema.Candidate],
     *,
     limit: int | None = None,
+    fallback_limit: int = 1,
 ) -> list[str]:
-    """Keep qualifying MMR representatives, or promote qualifying members."""
+    """Keep qualifying MMR representatives, or promote a conservative fallback."""
     representative_ids = [
         candidate_id
         for candidate_id in cluster.representative_ids
@@ -348,7 +349,7 @@ def _qualifying_representative_ids(
             for candidate_id in cluster.candidate_ids
             if candidate_id in candidate_by_id
             and _best_take_relevance_ok(candidate_by_id[candidate_id])
-        ]
+        ][:fallback_limit]
     return representative_ids[:limit] if limit is not None else representative_ids
 
 
@@ -381,7 +382,6 @@ def _render_ranked_clusters(
         representative_ids = _qualifying_representative_ids(
             cluster,
             candidate_by_id,
-            limit=1,
         )
         for rep_index, candidate_id in enumerate(representative_ids, start=1):
             candidate = candidate_by_id.get(candidate_id)
@@ -1365,7 +1365,6 @@ def _render_entity_evidence_block(
         representative_ids = _qualifying_representative_ids(
             cluster,
             candidate_by_id,
-            limit=1,
         )
         for rep_index, candidate_id in enumerate(representative_ids, start=1):
             candidate = candidate_by_id.get(candidate_id)
