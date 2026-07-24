@@ -464,7 +464,7 @@ def _candidates_for_auxiliary_sections(
     }
     visible_ids = {
         candidate_id
-        for cluster in _clusters_clearing_relevance_floor(report, report.clusters)
+        for cluster in visible_clusters
         for candidate_id in cluster.candidate_ids
     }
     return [
