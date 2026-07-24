@@ -1,6 +1,7 @@
+import copy
 import unittest
 
-from lib import render, schema
+from lib import hiring_signals, render, schema
 
 
 def sample_report() -> schema.Report:
@@ -84,6 +85,25 @@ def sample_report() -> schema.Report:
     )
 
 
+def mixed_representative_report() -> schema.Report:
+    report = sample_report()
+    missed_representative = report.ranked_candidates[0]
+    missed_representative.final_score = 14
+    missed_representative.explanation = (
+        "fallback-local-score (entity-miss demotion)"
+    )
+    qualifying_member = copy.deepcopy(missed_representative)
+    qualifying_member.candidate_id = "c2"
+    qualifying_member.title = "Solid nonrepresentative evidence"
+    qualifying_member.snippet = "Solid nonrepresentative evidence snippet."
+    qualifying_member.final_score = 72
+    qualifying_member.explanation = "high-signal result"
+    report.ranked_candidates.append(qualifying_member)
+    report.clusters[0].candidate_ids.append("c2")
+    report.clusters[0].score = 72
+    return report
+
+
 class RenderV3Tests(unittest.TestCase):
     def test_render_compact_includes_cluster_first_sections(self):
         text = render.render_compact(sample_report())
@@ -114,6 +134,205 @@ class RenderV3Tests(unittest.TestCase):
         report.errors_by_source = {"x": "HTTP 400: Bad Request"}
         text = render.render_compact(report)
         self.assertIn("## Source Errors", text)
+
+    def test_failed_x_bookmark_workflow_query_emits_no_solid_floor(self):
+        """Regression: generic token overlap must not turn all-zero X noise
+        into findings or quotable comments for a compound workflow query."""
+        report = sample_report()
+        report.topic = (
+            "AI-assisted X bookmark triage, knowledge capture, "
+            "and safe engagement automation"
+        )
+        report.query_plan.raw_topic = report.topic
+        report.clusters[0].score = 0
+        report.ranked_candidates[0].final_score = 0
+        report.ranked_candidates[0].explanation = (
+            "fallback-local-score (entity-miss demotion)"
+        )
+        report.ranked_candidates[0].source_items[0].metadata["top_comments"] = [
+            {
+                "excerpt": "An unrelated but highly voted comment one.",
+                "score": 500,
+            },
+            {
+                "excerpt": "An unrelated but highly voted comment two.",
+                "score": 400,
+            },
+        ]
+
+        text = render.render_compact(report)
+
+        self.assertIn("**Nothing solid this window.**", text)
+        self.assertNotIn("### 1. Grounded result", text)
+        self.assertNotIn("## Top Community Comments", text)
+        self.assertIn("## Stats", text)
+        self.assertIn("All agents reported back!", text)
+
+    def test_positive_cluster_with_only_entity_miss_representatives_is_rejected(self):
+        report = sample_report()
+        report.clusters[0].score = 30
+        report.ranked_candidates[0].final_score = 30
+        report.ranked_candidates[0].explanation = (
+            "fallback-local-score (entity-miss demotion)"
+        )
+
+        text = render.render_compact(report)
+
+        self.assertIn("**Nothing solid this window.**", text)
+        self.assertNotIn("### 1. Grounded result", text)
+
+    def test_qualifying_nonrepresentative_preserves_cluster_and_becomes_visible(self):
+        text = render.render_compact(mixed_representative_report())
+
+        self.assertNotIn("**Nothing solid this window.**", text)
+        self.assertIn("### 1. Grounded result", text)
+        self.assertIn("Solid nonrepresentative evidence", text)
+
+    def test_compact_and_comparison_preserve_all_qualifying_representatives(self):
+        report = sample_report()
+        second_representative = copy.deepcopy(report.ranked_candidates[0])
+        second_representative.candidate_id = "c2"
+        second_representative.title = "Second qualifying representative"
+        second_representative.snippet = "Independent supporting evidence."
+        report.ranked_candidates.append(second_representative)
+        report.clusters[0].candidate_ids.append("c2")
+        report.clusters[0].representative_ids.append("c2")
+
+        renderers = {
+            "compact": render.render_compact,
+            "comparison": lambda value: render.render_comparison_multi(
+                [("Example", value)]
+            ),
+        }
+        for name, renderer in renderers.items():
+            with self.subTest(mode=name):
+                text = renderer(report)
+                self.assertIn("Second qualifying representative", text)
+
+    def test_no_solid_cluster_suppresses_auxiliary_candidate_sections(self):
+        report = sample_report()
+        report.clusters[0].score = 0
+        report.ranked_candidates[0].title = "Could this rejected take leak?"
+        report.ranked_candidates[0].fun_score = 90
+        second_candidate = copy.deepcopy(report.ranked_candidates[0])
+        second_candidate.candidate_id = "c2"
+        second_candidate.title = "Another rejected but funny take?"
+        second_candidate.fun_score = 80
+        report.ranked_candidates.append(second_candidate)
+        report.clusters[0].candidate_ids.append("c2")
+        report.clusters[0].representative_ids.append("c2")
+
+        renderers = {
+            "compact": render.render_compact,
+            "comparison": lambda value: render.render_comparison_multi(
+                [("Example", value)]
+            ),
+            "full": render.render_full,
+            "brief": render.render_brief,
+        }
+        for name, renderer in renderers.items():
+            with self.subTest(mode=name):
+                text = renderer(report)
+                self.assertIn("Nothing solid this window.", text)
+                self.assertNotIn("## Best Takes", text)
+                self.assertNotIn("## Narrative Hooks", text)
+                self.assertNotIn("## Audience Questions", text)
+
+    def test_rejected_cluster_cannot_feed_auxiliary_sections(self):
+        report = sample_report()
+        rejected_item = copy.deepcopy(report.ranked_candidates[0].source_items[0])
+        rejected_item.item_id = "rejected-reddit"
+        rejected_item.url = "https://example.com/rejected"
+        rejected_item.metadata["top_comments"] = [
+            {"excerpt": "Rejected comment one must remain hidden.", "score": 99},
+            {"excerpt": "Rejected comment two must remain hidden.", "score": 98},
+        ]
+        rejected_candidate = copy.deepcopy(report.ranked_candidates[0])
+        rejected_candidate.candidate_id = "c-rejected"
+        rejected_candidate.item_id = rejected_item.item_id
+        rejected_candidate.title = "Could rejected evidence become a question?"
+        rejected_candidate.url = rejected_item.url
+        rejected_candidate.fun_score = 95
+        rejected_candidate.source_items = [rejected_item]
+
+        job_item = schema.SourceItem(
+            item_id="rejected-job",
+            source="jobs",
+            title="Rejected Strategic Engineer",
+            body="Founding enterprise security role.",
+            url="https://example.com/jobs/rejected",
+            container="Engineering",
+            published_at="2026-03-15",
+            metadata={"department": "Engineering"},
+        )
+        job_candidate = copy.deepcopy(rejected_candidate)
+        job_candidate.candidate_id = "c-rejected-job"
+        job_candidate.item_id = job_item.item_id
+        job_candidate.source = "jobs"
+        job_candidate.title = job_item.title
+        job_candidate.url = job_item.url
+        job_candidate.fun_score = None
+        job_candidate.source_items = [job_item]
+        report.ranked_candidates.extend([rejected_candidate, job_candidate])
+        report.clusters.append(schema.Cluster(
+            cluster_id="cluster-rejected",
+            title="Rejected cluster",
+            candidate_ids=["c-rejected", "c-rejected-job"],
+            representative_ids=["c-rejected"],
+            sources=["reddit", "jobs"],
+            score=0,
+        ))
+        report.artifacts["hiring_signals"] = hiring_signals.analyze(
+            [job_item],
+            explicit=True,
+            topic=report.topic,
+        )
+
+        renderers = {
+            "compact": render.render_compact,
+            "registered": lambda value: render.render_compact(
+                value,
+                register="creator",
+            ),
+            "context": render.render_context,
+            "brief": render.render_brief,
+        }
+        for name, renderer in renderers.items():
+            with self.subTest(mode=name):
+                text = renderer(report)
+                self.assertIn("Grounded result", text)
+                self.assertNotIn("Rejected comment", text)
+                self.assertNotIn("Could rejected evidence", text)
+                self.assertNotIn("Rejected Strategic Engineer", text)
+
+    def test_all_report_modes_promote_qualifying_nonrepresentative(self):
+        renderers = {
+            "comparison": lambda report: render.render_comparison_multi(
+                [("Example", report)]
+            ),
+            "full": render.render_full,
+            "context": render.render_context,
+            "brief": render.render_brief,
+        }
+
+        for name, renderer in renderers.items():
+            with self.subTest(mode=name):
+                text = renderer(mixed_representative_report())
+                self.assertNotIn("Nothing solid this window.", text)
+                self.assertIn("Solid nonrepresentative evidence", text)
+
+    def test_comparison_context_suppresses_all_miss_cluster(self):
+        report = sample_report()
+        report.ranked_candidates[0].final_score = 14
+        report.ranked_candidates[0].explanation = (
+            "fallback-local-score (entity-miss demotion)"
+        )
+        report.clusters[0].score = 72
+
+        text = render.render_comparison_multi_context([("Example", report)])
+
+        self.assertIn("Nothing solid this window.", text)
+        self.assertNotIn("- Grounded result [", text)
 
 
 class OutputEnvelopeTests(unittest.TestCase):
@@ -759,6 +978,7 @@ class RenderBriefTests(unittest.TestCase):
             source_items=[],
         )
         report.ranked_candidates.append(question_candidate)
+        report.clusters[0].candidate_ids.append("cq")
         text = render.render_brief(report)
         self.assertIn("## Audience Questions", text)
         self.assertIn("What are the best prompting tricks for Claude?", text)
@@ -793,6 +1013,7 @@ class RenderBriefTests(unittest.TestCase):
                 source_quality=0.8, rrf_score=0.01, final_score=70,
                 sources=["reddit"], source_items=[],
             ))
+            report.clusters[0].candidate_ids.append(f"cdup{i}")
         text = render.render_brief(report)
         self.assertEqual(text.count("What is the best approach?"), 1)
 
@@ -1033,6 +1254,30 @@ class TestRenderTopCommentsBlock(unittest.TestCase):
         text = render.render_compact(report)
         block = text.split("## Top Community Comments", 1)[1]
         self.assertIn("TurkiYe", block)
+
+    def test_excludes_comments_from_entity_miss_candidate_in_mixed_report(self):
+        missed = self._cand(
+            "missed",
+            "reddit",
+            5000,
+            "viral but unrelated entity-miss comment",
+        )
+        missed.final_score = 0
+        missed.explanation = "fallback-local-score (entity-miss demotion)"
+        report = self._report(
+            [
+                missed,
+                self._cand("good-a", "reddit", 100, "first relevant comment here"),
+                self._cand("good-b", "reddit", 90, "second relevant comment here"),
+            ],
+            representative_ids=["good-a"],
+        )
+
+        block = "\n".join(render._render_top_comments(report))
+
+        self.assertNotIn("viral but unrelated", block)
+        self.assertIn("first relevant comment", block)
+        self.assertIn("second relevant comment", block)
 
     def test_block_inside_evidence_envelope(self):
         report = self._report(

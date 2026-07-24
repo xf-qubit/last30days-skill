@@ -155,7 +155,7 @@ def _bullet_count(output: str, heading: str) -> int:
             "creator",
             ["Best Takes", "Top Community Comments", "Stats", "Ranked Evidence Clusters", "Source Coverage"],
             6,
-            8,
+            6,
         ),
     ],
 )
@@ -203,7 +203,7 @@ def test_default_register_is_byte_identical_when_omitted(monkeypatch):
 
     assert implicit == explicit
     assert hashlib.sha256(implicit.encode()).hexdigest() == (
-        "3f1eeb5ca4377f52f4eebff11f21cf5beaa02deddc25db12e1b2b9b1ae67e2d0"
+        "0e550d98b09885e868ea4a1fc8eb21b5babe10eefcba7f14be39e0a318e02f40"
     )
 
 
