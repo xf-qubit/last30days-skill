@@ -29,7 +29,6 @@ def _route(topic: str, *argv: str):
         comp_enabled=enabled,
         comp_count=count,
         comp_explicit=explicit,
-        has_plan=bool(plan),
         comp_plan=plan,
     )
 
@@ -132,7 +131,7 @@ class TestEntityCapAlignment(unittest.TestCase):
         err = io.StringIO()
         with redirect_stderr(err):
             kept = cli.truncate_comparison_entities(
-                planner._comparison_entities(topic, max_entities=-1),
+                planner._comparison_entities(topic, uncapped=True),
                 warn=True,
             )
         self.assertEqual(len(kept), competitors.COMPARISON_ENTITY_MAX)

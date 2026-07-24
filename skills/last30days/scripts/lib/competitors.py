@@ -19,9 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from . import dates, grounding, log
 from .resolve import _has_backend
 
-# Shared with CLI resolve_competitors_args / vs-mode routing / planner + render
-# comparison entity caps. COMPETITORS_MAX is peer count; a vs-string may name
-# the main topic plus that many peers.
+# Peer cap vs total vs-entity cap (main + peers).
 COMPETITORS_MIN = 1
 COMPETITORS_MAX = 6
 COMPETITORS_DEFAULT = 2

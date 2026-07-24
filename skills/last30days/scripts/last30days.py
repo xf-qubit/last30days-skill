@@ -814,17 +814,11 @@ def subrun_kwargs_for(
 COMPETITORS_MIN = competitors_mod.COMPETITORS_MIN
 COMPETITORS_MAX = competitors_mod.COMPETITORS_MAX
 COMPETITORS_DEFAULT = competitors_mod.COMPETITORS_DEFAULT
-COMPARISON_ENTITY_MAX = competitors_mod.COMPARISON_ENTITY_MAX
 
 
-def truncate_comparison_entities(
-    entities: list[str],
-    *,
-    warn: bool = True,
-    max_entities: int | None = None,
-) -> list[str]:
-    """Cap a vs-entity list; optionally warn on stderr naming dropped entities."""
-    ceiling = COMPARISON_ENTITY_MAX if max_entities is None else max_entities
+def truncate_comparison_entities(entities: list[str], *, warn: bool = True) -> list[str]:
+    """Cap a vs-entity list at COMPARISON_ENTITY_MAX; optionally warn on stderr."""
+    ceiling = competitors_mod.COMPARISON_ENTITY_MAX
     if len(entities) <= ceiling:
         return list(entities)
     kept = entities[:ceiling]
@@ -844,7 +838,6 @@ def apply_vs_competitor_routing(
     comp_enabled: bool,
     comp_count: int,
     comp_explicit: list[str],
-    has_plan: bool,
     comp_plan: dict[str, dict] | None = None,
 ) -> tuple[str, bool, int, list[str]]:
     """Apply vs-string / plan routing on top of resolve_competitors_args.
@@ -856,7 +849,7 @@ def apply_vs_competitor_routing(
       3. vs-string split (first entity becomes main topic) — used for bare
          vs-topics and vs-topic + ``--competitors-plan``
       4. ``--competitors-plan`` keys as peers when there is no vs-string
-      5. ``--competitors N`` + plan without vs-string → discover-N
+         (including when ``--competitors N`` is also set)
     """
     from lib import planner as _planner
 
@@ -865,11 +858,11 @@ def apply_vs_competitor_routing(
 
     # Preserve discover-N semantics: numeric flag without plan/list must not
     # rewrite a vs-string into named peers.
-    if competitors_flag is not None and not has_plan:
+    if competitors_flag is not None and not comp_plan:
         return topic, True, comp_count, []
 
     vs_entities = truncate_comparison_entities(
-        _planner._comparison_entities(topic, max_entities=-1),
+        _planner._comparison_entities(topic, uncapped=True),
         warn=True,
     )
     if len(vs_entities) >= 2:
@@ -880,11 +873,10 @@ def apply_vs_competitor_routing(
         )
         return main, True, len(peers), peers
 
-    if has_plan and comp_plan:
+    if comp_plan:
         plan_peers = [
             (entry.get("_name") or key)
             for key, entry in comp_plan.items()
-            if isinstance(entry, dict)
         ]
         plan_peers = [name for name in plan_peers if name]
         if len(plan_peers) > COMPETITORS_MAX:
@@ -894,9 +886,6 @@ def apply_vs_competitor_routing(
             )
             plan_peers = plan_peers[:COMPETITORS_MAX]
         return topic, True, len(plan_peers), plan_peers
-
-    if competitors_flag is not None:
-        return topic, True, comp_count, []
 
     return topic, comp_enabled, comp_count, comp_explicit
 
@@ -3185,7 +3174,6 @@ def _main(
             comp_enabled=comp_enabled,
             comp_count=comp_count,
             comp_explicit=comp_explicit,
-            has_plan=bool(comp_plan),
             comp_plan=comp_plan,
         )
 
