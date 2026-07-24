@@ -366,6 +366,16 @@ class FallbackVisibilityTests(unittest.TestCase):
             explanation="fallback-local-score (entity-miss demotion)",
             source="x",
         )
+        # Corpus titles are often filenames; retrieval may have matched body text
+        # that never lands in title/snippet, so local_relevance can sit below the
+        # public escape floor without meaning the document is off-topic.
+        corpus_body_match = self._candidate(
+            title="meeting-notes.md",
+            snippet="Agenda and follow-ups from last week.",
+            local_relevance=0.22,
+            explanation="fallback-local-score (entity-miss demotion)",
+            source="corpus",
+        )
 
         kept = rerank.prune_fallback_entity_misses(
             [
@@ -375,6 +385,7 @@ class FallbackVisibilityTests(unittest.TestCase):
                 ordinary_fallback,
                 incidental_metadata,
                 generic_title,
+                corpus_body_match,
             ],
             topic=self.topic,
         )
@@ -385,7 +396,29 @@ class FallbackVisibilityTests(unittest.TestCase):
         self.assertIn(adjacent, kept)
         self.assertIn(scoped_project, kept)
         self.assertIn(ordinary_fallback, kept)
+        self.assertIn(corpus_body_match, kept)
 
+    def test_keeps_fused_candidate_with_corpus_source_item(self):
+        fused = self._candidate(
+            title="weekly-summary.md",
+            snippet="No head token in the extracted window.",
+            local_relevance=0.18,
+            explanation="fallback-local-score (entity-miss demotion)",
+            source="web",
+        )
+        fused.source_items = [
+            schema.SourceItem(
+                item_id="c1",
+                source="corpus",
+                title="weekly-summary.md",
+                url="corpus://abc",
+                body="Notes on durable execution architecture for AI coding agents.",
+            )
+        ]
+
+        kept = rerank.prune_fallback_entity_misses([fused], topic=self.topic)
+
+        self.assertIn(fused, kept)
 
 class ExpandedHaystackTests(unittest.TestCase):
     """Unit 3: Entity-grounding haystack covers transcript snippets,

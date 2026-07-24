@@ -670,6 +670,13 @@ def _primary_entity(topic: str) -> str:
     return stripped
 
 
+def _is_corpus_candidate(candidate: schema.Candidate) -> bool:
+    """True when the candidate carries private corpus evidence."""
+    if candidate.source == "corpus":
+        return True
+    return any(item.source == "corpus" for item in candidate.source_items)
+
+
 def prune_fallback_entity_misses(
     candidates: list[schema.Candidate],
     *,
@@ -684,7 +691,9 @@ def prune_fallback_entity_misses(
     relevance floor and it lacks a strong local-relevance signal from an
     explicitly scoped retrieval path. Comments and transcripts are excluded
     from this escape because incidental words there do not ground the candidate
-    itself. Source items remain in the report's diagnostic source dump.
+    itself. Private corpus candidates always escape: retrieval already accepted
+    them on body text, and titles are often filenames that omit the head token.
+    Source items remain in the report's diagnostic source dump.
     """
     if not topic:
         return candidates
@@ -692,6 +701,9 @@ def prune_fallback_entity_misses(
     kept: list[schema.Candidate] = []
     for candidate in candidates:
         if candidate.explanation != _FALLBACK_ENTITY_MISS_EXPLANATION:
+            kept.append(candidate)
+            continue
+        if _is_corpus_candidate(candidate):
             kept.append(candidate)
             continue
         if candidate.local_relevance >= FALLBACK_ENTITY_MISS_CONFIDENCE_ESCAPE:
