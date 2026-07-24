@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- YouTube transcript fetches now reuse a completed VTT left on disk when yt-dlp times out, honor `.env` values for caption languages, and allow keyed runs to tune the 12-second fast-fail timeout.
+
 ## [3.18.0] - 2026-07-21
 
 ### Changed
