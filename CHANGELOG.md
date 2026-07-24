@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Docs now match Reddit ScrapeCreators search backup semantics: empty-only by default (not "when public Reddit is unavailable" / rate-limited). `CONFIGURATION.md` documents `LAST30DAYS_REDDIT_SC_MIN_ITEMS`; `SKILL.md` Security, Manual setup, NUX, and the Reddit backend pin describe the real empty-path / thinness-floor / SC-primary knobs. NUX Step 4/5 no longer claim SC Reddit comment enrichment or `public + ScrapeCreators` merge on the default free path (comments stay keyless via shreddit) ([#867](https://github.com/mvanhorn/last30days-skill/issues/867)).
+
 ## [3.18.0] - 2026-07-21
 
 ### Changed
