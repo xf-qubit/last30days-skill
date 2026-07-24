@@ -116,7 +116,10 @@ class TestFiveWayComparison(unittest.TestCase):
             model=None,
         )
         from lib import competitors
-        self.assertLessEqual(len(plan.subqueries), competitors.COMPARISON_ENTITY_MAX)
+        self.assertLessEqual(
+            len(plan.subqueries),
+            competitors.COMPARISON_ENTITY_MAX + 1,
+        )
 
 
 class TestDegenerateInputs(unittest.TestCase):
@@ -155,7 +158,10 @@ class TestDegenerateInputs(unittest.TestCase):
             model=None,
         )
         from lib import competitors
-        self.assertLessEqual(len(plan.subqueries), competitors.COMPARISON_ENTITY_MAX)
+        self.assertLessEqual(
+            len(plan.subqueries),
+            competitors.COMPARISON_ENTITY_MAX + 1,
+        )
 
 
 class TestMixedCaseAndPunctuation(unittest.TestCase):

@@ -3177,6 +3177,21 @@ def _main(
             comp_plan=comp_plan,
         )
 
+        # Plan alone with zero peers (empty/invalid JSON object, or all entries
+        # skipped) must not fall through to discover-N with a misleading abort.
+        if (
+            comp_enabled
+            and not comp_explicit
+            and args.competitors is None
+            and args.competitors_plan
+        ):
+            sys.stderr.write(
+                "[Competitors] --competitors-plan has no usable peer entries "
+                "(and the topic is not a vs-comparison). Pass a non-empty plan, "
+                "a vs-topic, --competitors-list, or --competitors N.\n"
+            )
+            return 2
+
         # Dedicated subs ride the config dict (already threaded to every source
         # fetch) so the keyless Reddit path can pull them floor-exempt without
         # widening pipeline.run / _retrieve_stream signatures.

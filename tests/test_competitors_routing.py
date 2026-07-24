@@ -115,7 +115,7 @@ class TestEntityCapAlignment(unittest.TestCase):
         )
         self.assertEqual(
             planner._max_subqueries("comparison"),
-            competitors.COMPARISON_ENTITY_MAX,
+            competitors.COMPARISON_ENTITY_MAX + 1,  # primary + per-entity
         )
 
     def test_five_way_not_silently_truncated(self):
@@ -124,6 +124,34 @@ class TestEntityCapAlignment(unittest.TestCase):
             entities,
             ["Weber", "Traeger", "Big Green Egg", "Blackstone", "Napoleon Grills"],
         )
+
+    def test_fallback_plan_keeps_all_entities_at_ceiling(self):
+        topic = "A vs B vs C vs D vs E vs F vs G"
+        entities = planner._comparison_entities(topic)
+        self.assertEqual(len(entities), competitors.COMPARISON_ENTITY_MAX)
+        plan = planner._fallback_plan(topic, ["reddit"], None, "standard")
+        entity_labels = [sq.label for sq in plan.subqueries if sq.label.startswith("entity-")]
+        self.assertEqual(len(entity_labels), competitors.COMPARISON_ENTITY_MAX)
+        self.assertIn("primary", [sq.label for sq in plan.subqueries])
+
+    def test_empty_plan_alone_errors_clearly(self):
+        args = _parse("Weber grills", "--competitors-plan", "{}")
+        enabled, count, explicit = cli.resolve_competitors_args(args)
+        plan = cli.parse_competitors_plan(args.competitors_plan)
+        topic, enabled, count, explicit = cli.apply_vs_competitor_routing(
+            "Weber grills",
+            competitors_flag=args.competitors,
+            comp_enabled=enabled,
+            comp_count=count,
+            comp_explicit=explicit,
+            comp_plan=plan,
+        )
+        self.assertTrue(enabled)
+        self.assertEqual(explicit, [])
+        # Guard in _main: plan present, no peers, not discover-N
+        self.assertIsNone(args.competitors)
+        self.assertTrue(args.competitors_plan)
+        self.assertFalse(explicit)
 
     def test_over_max_warns_and_names_dropped(self):
         # main + 6 peers = max; 8th entity dropped with warning

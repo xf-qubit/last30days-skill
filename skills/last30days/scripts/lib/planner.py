@@ -908,7 +908,8 @@ def _max_subqueries(intent: str, topic: str | None = None) -> int:
     # Hermes Agent Use Cases failure: prior cap of 3 produced near-literal
     # echoes of the topic instead of a paraphrase fanout.
     if intent == "comparison":
-        return competitors.COMPARISON_ENTITY_MAX
+        # primary + one dedicated subquery per entity (up to COMPARISON_ENTITY_MAX)
+        return competitors.COMPARISON_ENTITY_MAX + 1
     # Intent-modifier topics get headroom for paraphrase fanout even when
     # the intent itself is factual/concept. Without this, a "Hermes Agent
     # use cases" query (classified "concept" after the 2026-04-19 default

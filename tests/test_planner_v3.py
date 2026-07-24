@@ -344,7 +344,7 @@ class IntentModifierBreadthTests(unittest.TestCase):
     def test_max_subqueries_unchanged_for_comparison(self):
         from lib import competitors
         self.assertEqual(
-            competitors.COMPARISON_ENTITY_MAX,
+            competitors.COMPARISON_ENTITY_MAX + 1,
             planner._max_subqueries("comparison"),
         )
 
