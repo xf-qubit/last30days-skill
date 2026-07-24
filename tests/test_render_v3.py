@@ -85,6 +85,25 @@ def sample_report() -> schema.Report:
     )
 
 
+def mixed_representative_report() -> schema.Report:
+    report = sample_report()
+    missed_representative = report.ranked_candidates[0]
+    missed_representative.final_score = 14
+    missed_representative.explanation = (
+        "fallback-local-score (entity-miss demotion)"
+    )
+    qualifying_member = copy.deepcopy(missed_representative)
+    qualifying_member.candidate_id = "c2"
+    qualifying_member.title = "Solid nonrepresentative evidence"
+    qualifying_member.snippet = "Solid nonrepresentative evidence snippet."
+    qualifying_member.final_score = 72
+    qualifying_member.explanation = "high-signal result"
+    report.ranked_candidates.append(qualifying_member)
+    report.clusters[0].candidate_ids.append("c2")
+    report.clusters[0].score = 72
+    return report
+
+
 class RenderV3Tests(unittest.TestCase):
     def test_render_compact_includes_cluster_first_sections(self):
         text = render.render_compact(sample_report())
@@ -163,26 +182,40 @@ class RenderV3Tests(unittest.TestCase):
         self.assertNotIn("### 1. Grounded result", text)
 
     def test_qualifying_nonrepresentative_preserves_cluster_and_becomes_visible(self):
-        report = sample_report()
-        missed_representative = report.ranked_candidates[0]
-        missed_representative.final_score = 14
-        missed_representative.explanation = (
-            "fallback-local-score (entity-miss demotion)"
-        )
-        qualifying_member = copy.deepcopy(missed_representative)
-        qualifying_member.candidate_id = "c2"
-        qualifying_member.title = "Solid nonrepresentative evidence"
-        qualifying_member.final_score = 72
-        qualifying_member.explanation = "high-signal result"
-        report.ranked_candidates.append(qualifying_member)
-        report.clusters[0].candidate_ids.append("c2")
-        report.clusters[0].score = 72
-
-        text = render.render_compact(report)
+        text = render.render_compact(mixed_representative_report())
 
         self.assertNotIn("**Nothing solid this window.**", text)
         self.assertIn("### 1. Grounded result", text)
         self.assertIn("Solid nonrepresentative evidence", text)
+
+    def test_all_report_modes_promote_qualifying_nonrepresentative(self):
+        renderers = {
+            "comparison": lambda report: render.render_comparison_multi(
+                [("Example", report)]
+            ),
+            "full": render.render_full,
+            "context": render.render_context,
+            "brief": render.render_brief,
+        }
+
+        for name, renderer in renderers.items():
+            with self.subTest(mode=name):
+                text = renderer(mixed_representative_report())
+                self.assertNotIn("Nothing solid this window.", text)
+                self.assertIn("Solid nonrepresentative evidence", text)
+
+    def test_comparison_context_suppresses_all_miss_cluster(self):
+        report = sample_report()
+        report.ranked_candidates[0].final_score = 14
+        report.ranked_candidates[0].explanation = (
+            "fallback-local-score (entity-miss demotion)"
+        )
+        report.clusters[0].score = 72
+
+        text = render.render_comparison_multi_context([("Example", report)])
+
+        self.assertIn("Nothing solid this window.", text)
+        self.assertNotIn("- Grounded result [", text)
 
 
 class OutputEnvelopeTests(unittest.TestCase):

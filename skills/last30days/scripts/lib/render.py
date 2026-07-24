@@ -329,6 +329,29 @@ def _format_library_engagement(value: float) -> str:
     return f"{value:g}"
 
 
+def _qualifying_representative_ids(
+    cluster: schema.Cluster,
+    candidate_by_id: dict[str, schema.Candidate],
+    *,
+    limit: int | None = None,
+) -> list[str]:
+    """Keep qualifying MMR representatives, or promote qualifying members."""
+    representative_ids = [
+        candidate_id
+        for candidate_id in cluster.representative_ids
+        if candidate_id in candidate_by_id
+        and _best_take_relevance_ok(candidate_by_id[candidate_id])
+    ]
+    if not representative_ids:
+        representative_ids = [
+            candidate_id
+            for candidate_id in cluster.candidate_ids
+            if candidate_id in candidate_by_id
+            and _best_take_relevance_ok(candidate_by_id[candidate_id])
+        ]
+    return representative_ids[:limit] if limit is not None else representative_ids
+
+
 def _render_ranked_clusters(
     report: schema.Report,
     clusters: list[schema.Cluster],
@@ -355,19 +378,11 @@ def _render_ranked_clusters(
         )
         if cluster.uncertainty:
             lines.append(f"- Uncertainty: {cluster.uncertainty}")
-        representative_ids = [
-            candidate_id
-            for candidate_id in cluster.representative_ids
-            if candidate_id in candidate_by_id
-            and _best_take_relevance_ok(candidate_by_id[candidate_id])
-        ]
-        if not representative_ids:
-            representative_ids = [
-                candidate_id
-                for candidate_id in cluster.candidate_ids
-                if candidate_id in candidate_by_id
-                and _best_take_relevance_ok(candidate_by_id[candidate_id])
-            ][:1]
+        representative_ids = _qualifying_representative_ids(
+            cluster,
+            candidate_by_id,
+            limit=1,
+        )
         for rep_index, candidate_id in enumerate(representative_ids, start=1):
             candidate = candidate_by_id.get(candidate_id)
             if not candidate:
@@ -1313,6 +1328,11 @@ def _render_entity_evidence_block(
     """Render one entity's clusters and best-takes inside the evidence envelope."""
     evidence_report = schema.without_sources(report, {"corpus"})
     candidate_by_id = {c.candidate_id: c for c in evidence_report.ranked_candidates}
+    requested_clusters = evidence_report.clusters[:cluster_limit]
+    visible_clusters = _clusters_clearing_relevance_floor(
+        evidence_report,
+        requested_clusters,
+    )
     out: list[str] = [f"## {label}", ""]
 
     if not evidence_report.clusters:
@@ -1326,7 +1346,14 @@ def _render_entity_evidence_block(
 
     out.append("### Ranked Evidence Clusters")
     out.append("")
-    for index, cluster in enumerate(evidence_report.clusters[:cluster_limit], start=1):
+    if requested_clusters and not visible_clusters:
+        out.extend([
+            "**Nothing solid this window.**",
+            "",
+            "No recent evidence cluster cleared the relevance floor.",
+            "",
+        ])
+    for index, cluster in enumerate(visible_clusters, start=1):
         out.append(
             f"#### {index}. {cluster.title} "
             f"(score {cluster.score:.0f}, {len(cluster.candidate_ids)} item"
@@ -1335,7 +1362,12 @@ def _render_entity_evidence_block(
         )
         if cluster.uncertainty:
             out.append(f"- Uncertainty: {cluster.uncertainty}")
-        for rep_index, candidate_id in enumerate(cluster.representative_ids, start=1):
+        representative_ids = _qualifying_representative_ids(
+            cluster,
+            candidate_by_id,
+            limit=1,
+        )
+        for rep_index, candidate_id in enumerate(representative_ids, start=1):
             candidate = candidate_by_id.get(candidate_id)
             if not candidate:
                 continue
@@ -1381,12 +1413,19 @@ def render_comparison_multi_context(
         lines.append("")
     for label, report in entity_reports:
         evidence_report = schema.without_sources(report, {"corpus"})
+        requested_clusters = evidence_report.clusters[:cluster_limit]
+        visible_clusters = _clusters_clearing_relevance_floor(
+            evidence_report,
+            requested_clusters,
+        )
         lines.append(f"## {label}")
         lines.append(f"Intent: {report.query_plan.intent}")
         if not evidence_report.clusters:
             lines.append("- (no significant discussion this month)")
+        elif not visible_clusters:
+            lines.append("- Nothing solid this window.")
         else:
-            for cluster in evidence_report.clusters[:cluster_limit]:
+            for cluster in visible_clusters:
                 lines.append(
                     f"- {cluster.title} "
                     f"[{', '.join(_source_label(s) for s in cluster.sources)}]"
@@ -1433,23 +1472,7 @@ def render_full(report: schema.Report) -> str:
             lines.append("")
 
     # ALL clusters (no limit)
-    lines.append("## Ranked Evidence Clusters")
-    lines.append("")
-    candidate_by_id = {c.candidate_id: c for c in evidence_report.ranked_candidates}
-    for index, cluster in enumerate(evidence_report.clusters, start=1):
-        lines.append(
-            f"### {index}. {cluster.title} "
-            f"(score {cluster.score:.0f}, {len(cluster.candidate_ids)} item{'s' if len(cluster.candidate_ids) != 1 else ''}, "
-            f"sources: {', '.join(_source_label(s) for s in cluster.sources)})"
-        )
-        if cluster.uncertainty:
-            lines.append(f"- Uncertainty: {cluster.uncertainty}")
-        for rep_index, cid in enumerate(cluster.representative_ids, start=1):
-            candidate = candidate_by_id.get(cid)
-            if not candidate:
-                continue
-            lines.extend(_render_candidate(candidate, prefix=f"{rep_index}.", report=evidence_report))
-        lines.append("")
+    lines.extend(_render_ranked_clusters(evidence_report, evidence_report.clusters))
 
     fun_params = _FUN_LEVELS["medium"]
     best_takes = _render_best_takes(
@@ -1565,6 +1588,12 @@ def _format_item_engagement(item: schema.SourceItem) -> str:
 def render_context(report: schema.Report, cluster_limit: int = 6) -> str:
     evidence_report = schema.without_sources(report, {"corpus"})
     candidate_by_id = {candidate.candidate_id: candidate for candidate in evidence_report.ranked_candidates}
+    requested_clusters = evidence_report.clusters[:cluster_limit]
+    visible_clusters = _clusters_clearing_relevance_floor(
+        evidence_report,
+        requested_clusters,
+    )
+    no_solid_evidence = bool(requested_clusters) and not visible_clusters
     lines = [
         f"Topic: {report.topic}",
         f"Intent: {report.query_plan.intent}",
@@ -1579,13 +1608,19 @@ def render_context(report: schema.Report, cluster_limit: int = 6) -> str:
     freshness_warning = _assess_data_freshness(report)
     if freshness_warning:
         lines.append(f"Freshness warning: {freshness_warning}")
-    hiring_block = _render_hiring_signals(report)
+    hiring_block = [] if no_solid_evidence else _render_hiring_signals(report)
     if hiring_block:
         lines.extend(["", *hiring_block, ""])
     lines.append("Top clusters:")
-    for cluster in evidence_report.clusters[:cluster_limit]:
+    if no_solid_evidence:
+        lines.append("- Nothing solid this window.")
+    for cluster in visible_clusters:
         lines.append(f"- {cluster.title} [{', '.join(_source_label(source) for source in cluster.sources)}]")
-        for candidate_id in cluster.representative_ids[:2]:
+        for candidate_id in _qualifying_representative_ids(
+            cluster,
+            candidate_by_id,
+            limit=2,
+        ):
             candidate = candidate_by_id.get(candidate_id)
             if not candidate:
                 continue
@@ -1641,11 +1676,27 @@ def render_brief(report: schema.Report, cluster_limit: int = 8) -> str:
     lines.append("## Ranked Storylines")
     lines.append("")
     candidate_by_id = {c.candidate_id: c for c in evidence_report.ranked_candidates}
-    for i, cluster in enumerate(evidence_report.clusters[:cluster_limit], start=1):
+    requested_clusters = evidence_report.clusters[:cluster_limit]
+    visible_clusters = _clusters_clearing_relevance_floor(
+        evidence_report,
+        requested_clusters,
+    )
+    qualifying_candidates = [
+        candidate
+        for candidate in evidence_report.ranked_candidates
+        if _best_take_relevance_ok(candidate)
+    ]
+    if requested_clusters and not visible_clusters:
+        lines.extend(["**Nothing solid this window.**", ""])
+    for i, cluster in enumerate(visible_clusters, start=1):
         source_tags = ", ".join(_source_label(s) for s in cluster.sources)
         qualifier = f" [{cluster.uncertainty.replace('-', ' ')}]" if cluster.uncertainty else ""
         lines.append(f"### {i}. {cluster.title} (score {cluster.score:.0f}, {source_tags}){qualifier}")
-        for cid in cluster.representative_ids[:2]:
+        for cid in _qualifying_representative_ids(
+            cluster,
+            candidate_by_id,
+            limit=2,
+        ):
             candidate = candidate_by_id.get(cid)
             if not candidate:
                 continue
@@ -1657,7 +1708,7 @@ def render_brief(report: schema.Report, cluster_limit: int = 8) -> str:
         lines.append("")
 
     hooks = sorted(
-        (c for c in evidence_report.ranked_candidates if c.fun_score is not None and c.fun_score >= 70),
+        (c for c in qualifying_candidates if c.fun_score is not None and c.fun_score >= 70),
         key=lambda c: -(c.fun_score or 0),
     )
     if hooks:
@@ -1685,7 +1736,7 @@ def render_brief(report: schema.Report, cluster_limit: int = 8) -> str:
             )
         lines.append("")
 
-    tensions = [c for c in evidence_report.clusters[:cluster_limit] if c.uncertainty]
+    tensions = [c for c in visible_clusters if c.uncertainty]
     if tensions:
         lines.append("## Topic Tensions")
         lines.append("")
@@ -1695,7 +1746,7 @@ def render_brief(report: schema.Report, cluster_limit: int = 8) -> str:
             lines.append(f"- **{cluster.title}** [{label}]: {source_tags}")
         lines.append("")
 
-    questions = _extract_audience_questions(evidence_report.ranked_candidates)
+    questions = _extract_audience_questions(qualifying_candidates)
     if questions:
         lines.append("## Audience Questions")
         lines.append("")
@@ -1705,7 +1756,7 @@ def render_brief(report: schema.Report, cluster_limit: int = 8) -> str:
 
     lines.append("## Source Clusters")
     lines.append("")
-    for cluster in evidence_report.clusters[:cluster_limit]:
+    for cluster in visible_clusters:
         source_tags = " + ".join(_source_label(s) for s in cluster.sources)
         lines.append(f"- **{cluster.title}**: {source_tags}")
     lines.append("")
