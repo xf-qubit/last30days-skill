@@ -423,6 +423,23 @@ def _clusters_clearing_relevance_floor(
     return solid
 
 
+def _candidates_in_clusters(
+    report: schema.Report,
+    clusters: list[schema.Cluster],
+) -> list[schema.Candidate]:
+    """Return ranked candidates belonging to the supplied visible clusters."""
+    candidate_ids = {
+        candidate_id
+        for cluster in clusters
+        for candidate_id in cluster.candidate_ids
+    }
+    return [
+        candidate
+        for candidate in report.ranked_candidates
+        if candidate.candidate_id in candidate_ids
+    ]
+
+
 def _visible_clusters_fail_relevance_floor(
     report: schema.Report,
     clusters: list[schema.Cluster],
@@ -559,7 +576,10 @@ def _render_registered_sections(
         top_comments: list[str] = []
     else:
         best_takes = _render_best_takes(
-            report.ranked_candidates,
+            _candidates_in_clusters(
+                report,
+                _clusters_clearing_relevance_floor(report, visible_clusters),
+            ),
             limit=audience.budget_for("best_takes", int(fun_params["limit"])),
             threshold=float(fun_params["threshold"]),
             vote_weight=float(fun_params.get("vote_weight", 18.0)),
@@ -689,7 +709,13 @@ def render_compact(
 
         if not no_solid_evidence:
             best_takes = _render_best_takes(
-                evidence_report.ranked_candidates,
+                _candidates_in_clusters(
+                    evidence_report,
+                    _clusters_clearing_relevance_floor(
+                        evidence_report,
+                        visible_clusters,
+                    ),
+                ),
                 limit=fun_params["limit"],
                 threshold=fun_params["threshold"],
                 vote_weight=fun_params.get("vote_weight", 18.0),
@@ -1374,7 +1400,7 @@ def _render_entity_evidence_block(
         out.append("")
 
     best_takes = _render_best_takes(
-        evidence_report.ranked_candidates,
+        _candidates_in_clusters(evidence_report, visible_clusters),
         limit=fun_params["limit"],
         threshold=fun_params["threshold"],
         vote_weight=fun_params.get("vote_weight", 18.0),
@@ -1475,7 +1501,13 @@ def render_full(report: schema.Report) -> str:
 
     fun_params = _FUN_LEVELS["medium"]
     best_takes = _render_best_takes(
-        evidence_report.ranked_candidates,
+        _candidates_in_clusters(
+            evidence_report,
+            _clusters_clearing_relevance_floor(
+                evidence_report,
+                evidence_report.clusters,
+            ),
+        ),
         limit=fun_params["limit"],
         threshold=fun_params["threshold"],
         vote_weight=fun_params["vote_weight"],
@@ -1680,11 +1712,15 @@ def render_brief(report: schema.Report, cluster_limit: int = 8) -> str:
         evidence_report,
         requested_clusters,
     )
-    qualifying_candidates = [
-        candidate
-        for candidate in evidence_report.ranked_candidates
-        if _best_take_relevance_ok(candidate)
-    ]
+    qualifying_candidates = (
+        []
+        if requested_clusters and not visible_clusters
+        else [
+            candidate
+            for candidate in evidence_report.ranked_candidates
+            if _best_take_relevance_ok(candidate)
+        ]
+    )
     if requested_clusters and not visible_clusters:
         lines.extend(["**Nothing solid this window.**", ""])
     for i, cluster in enumerate(visible_clusters, start=1):

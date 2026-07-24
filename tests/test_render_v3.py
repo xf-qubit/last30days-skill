@@ -209,6 +209,35 @@ class RenderV3Tests(unittest.TestCase):
                 text = renderer(report)
                 self.assertIn("Second qualifying representative", text)
 
+    def test_no_solid_cluster_suppresses_auxiliary_candidate_sections(self):
+        report = sample_report()
+        report.clusters[0].score = 0
+        report.ranked_candidates[0].title = "Could this rejected take leak?"
+        report.ranked_candidates[0].fun_score = 90
+        second_candidate = copy.deepcopy(report.ranked_candidates[0])
+        second_candidate.candidate_id = "c2"
+        second_candidate.title = "Another rejected but funny take?"
+        second_candidate.fun_score = 80
+        report.ranked_candidates.append(second_candidate)
+        report.clusters[0].candidate_ids.append("c2")
+        report.clusters[0].representative_ids.append("c2")
+
+        renderers = {
+            "compact": render.render_compact,
+            "comparison": lambda value: render.render_comparison_multi(
+                [("Example", value)]
+            ),
+            "full": render.render_full,
+            "brief": render.render_brief,
+        }
+        for name, renderer in renderers.items():
+            with self.subTest(mode=name):
+                text = renderer(report)
+                self.assertIn("Nothing solid this window.", text)
+                self.assertNotIn("## Best Takes", text)
+                self.assertNotIn("## Narrative Hooks", text)
+                self.assertNotIn("## Audience Questions", text)
+
     def test_all_report_modes_promote_qualifying_nonrepresentative(self):
         renderers = {
             "comparison": lambda report: render.render_comparison_multi(
