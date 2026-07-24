@@ -957,7 +957,8 @@ class TestYtdlpFastFail(unittest.TestCase):
         """token present -> one attempt, shortened timeout, no retry sleeps."""
         with tempfile.TemporaryDirectory() as temp_dir:
             status = {}
-            with mock.patch.object(youtube_yt, "is_ytdlp_installed", return_value=True), \
+            with mock.patch.dict(os.environ, {"LAST30DAYS_YT_TRANSCRIPT_FAST_TIMEOUT": ""}), \
+                 mock.patch.object(youtube_yt, "is_ytdlp_installed", return_value=True), \
                  mock.patch.object(youtube_yt.subproc, "run_with_timeout",
                                    return_value=self._transient_fail()) as run_mock, \
                  mock.patch.object(youtube_yt.time, "sleep") as sleep_mock:
