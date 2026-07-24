@@ -92,7 +92,7 @@ class PlannerV3Tests(unittest.TestCase):
         self.assertEqual(1, len(plan.subqueries))
         self.assertEqual(["reddit", "x"], plan.subqueries[0].sources)
 
-    def test_quick_mode_preserves_explicit_requested_sources(self):
+    def test_quick_mode_prioritizes_explicit_requested_sources_within_cap(self):
         raw = {
             "intent": "product",
             "freshness_mode": "balanced_recent",
@@ -111,10 +111,11 @@ class PlannerV3Tests(unittest.TestCase):
             raw,
             "AI coding agents",
             ["reddit", "youtube", "grounding", "digg"],
-            ["reddit", "youtube", "grounding", "digg"],
+            ["digg", "reddit", "youtube", "grounding"],
             "quick",
         )
         self.assertIn("digg", plan.subqueries[0].sources)
+        self.assertLessEqual(len(plan.subqueries[0].sources), 2)
 
     def test_quick_mode_preserves_explicit_requested_sources_in_fallback_plan(self):
         plan = planner.plan_query(
@@ -207,6 +208,19 @@ class PlannerV3Tests(unittest.TestCase):
         # how_to routing should include youtube (longform) over tiktok/instagram
         self.assertIn("youtube", sources)
         self.assertIn("reddit", sources)
+
+    def test_product_plan_can_include_jobs_source(self):
+        plan = planner.plan_query(
+            topic="Listen Labs features",
+            available_sources=["reddit", "youtube", "jobs", "hackernews"],
+            requested_sources=None,
+            depth="default",
+            provider=None,
+            model=None,
+        )
+        self.assertEqual("product", plan.intent)
+        self.assertIn("jobs", plan.subqueries[0].sources)
+        self.assertGreater(plan.source_weights["jobs"], plan.source_weights["youtube"])
 
     def test_prediction_includes_tiktok_and_instagram(self):
         """TikTok and Instagram are no longer excluded from prediction intent."""
@@ -328,7 +342,11 @@ class IntentModifierBreadthTests(unittest.TestCase):
         self.assertEqual(5, planner._max_subqueries("product"))
 
     def test_max_subqueries_unchanged_for_comparison(self):
-        self.assertEqual(4, planner._max_subqueries("comparison"))
+        from lib import competitors
+        self.assertEqual(
+            competitors.COMPARISON_ENTITY_MAX + 1,
+            planner._max_subqueries("comparison"),
+        )
 
     def test_max_subqueries_unchanged_for_factual_and_concept(self):
         self.assertEqual(2, planner._max_subqueries("factual"))

@@ -26,22 +26,11 @@ def _scored(i, score, ncmt=0):
     return p
 
 
-class TestDiscoveryTierOrder:
-    """Tier 0 (.json) is tried first; RSS + scored listings are the keyless path."""
+class TestDiscovery:
+    """RSS breadth + scored listings are the keyless discovery path (no .json)."""
 
-    def test_tier0_success_skips_keyless(self):
-        with mock.patch.object(reddit_keyless, "_tier0_json", return_value=[_post(1)]) as t0, \
-             mock.patch.object(reddit_keyless.reddit_rss, "search_rss") as rss, \
-             mock.patch.object(reddit_keyless.reddit_listing, "fetch_listings") as lst:
-            out = reddit_keyless._discover("topic", "default", None)
-        assert len(out) == 1
-        t0.assert_called_once()
-        rss.assert_not_called()
-        lst.assert_not_called()
-
-    def test_tier0_empty_falls_to_keyless(self):
-        with mock.patch.object(reddit_keyless, "_tier0_json", return_value=[]), \
-             mock.patch.object(reddit_keyless.reddit_rss, "search_rss",
+    def test_keyless_path_runs_rss_and_listings(self):
+        with mock.patch.object(reddit_keyless.reddit_rss, "search_rss",
                                return_value=[_post(1), _post(2)]) as rss, \
              mock.patch.object(reddit_keyless.reddit_listing, "fetch_listings",
                                return_value=[]):
@@ -53,8 +42,7 @@ class TestDiscoveryTierOrder:
         # RSS finds post 1 (no score); listing card for post 1 carries the score.
         rss_post = _post(1)
         listing_post = _scored(1, score=52692, ncmt=1743)
-        with mock.patch.object(reddit_keyless, "_tier0_json", return_value=[]), \
-             mock.patch.object(reddit_keyless.reddit_rss, "search_rss",
+        with mock.patch.object(reddit_keyless.reddit_rss, "search_rss",
                                return_value=[rss_post]), \
              mock.patch.object(reddit_keyless.reddit_listing, "fetch_listings",
                                return_value=[listing_post]):
@@ -69,8 +57,7 @@ class TestDiscoveryTierOrder:
         rss_post = _post(7)  # url .../000007/...
         listing_post = _scored(7, score=999)
         listing_post["url"] = "https://www.reddit.com/r/test/comments/zzzzzz/other/"
-        with mock.patch.object(reddit_keyless, "_tier0_json", return_value=[]), \
-             mock.patch.object(reddit_keyless.reddit_rss, "search_rss",
+        with mock.patch.object(reddit_keyless.reddit_rss, "search_rss",
                                return_value=[rss_post]), \
              mock.patch.object(reddit_keyless.reddit_listing, "fetch_listings",
                                return_value=[listing_post]):
@@ -85,8 +72,7 @@ class TestDiscoveryTierOrder:
         rss_post = _post(1)  # on-topic keyword match
         offtopic_listing = _scored(99, score=88888)  # high score, unrelated sub
         offtopic_listing["url"] = "https://www.reddit.com/r/random/comments/zzz999/x/"
-        with mock.patch.object(reddit_keyless, "_tier0_json", return_value=[]), \
-             mock.patch.object(reddit_keyless.reddit_rss, "search_rss",
+        with mock.patch.object(reddit_keyless.reddit_rss, "search_rss",
                                return_value=[rss_post]), \
              mock.patch.object(reddit_keyless, "_top_subreddits", return_value=["random"]), \
              mock.patch.object(reddit_keyless.reddit_listing, "fetch_listings",
@@ -96,9 +82,8 @@ class TestDiscoveryTierOrder:
         assert rss_post["url"] in urls
         assert offtopic_listing["url"] not in urls  # not merged as discovery
 
-    def test_tier0_never_raises(self):
-        with mock.patch("lib.reddit_public.search", side_effect=Exception("boom")), \
-             mock.patch.object(reddit_keyless.reddit_rss, "search_rss", return_value=[]), \
+    def test_discover_never_raises_returns_empty(self):
+        with mock.patch.object(reddit_keyless.reddit_rss, "search_rss", return_value=[]), \
              mock.patch.object(reddit_keyless.reddit_listing, "fetch_listings", return_value=[]):
             assert reddit_keyless._discover("t", "default", None) == []
 
@@ -204,18 +189,22 @@ class TestSlotPriority:
         assert posts[4]["url"] in enriched_urls
         assert len(enriched_urls) == reddit_keyless.ENRICH_LIMITS["quick"]
 
-    def test_multiword_topic_uses_substring_not_token_overlap(self):
-        # "claude tips" clears token overlap for "Claude Code" but rerank
-        # demotes it; the partition must mirror rerank's substring test.
-        token_only = self._titled(1, "claude tips", score=500)
-        full_entity = self._titled(2, "Claude Code best setup", score=5)
-        out = reddit_keyless._slot_priority("Claude Code", [token_only, full_entity])
-        assert out[0] is full_entity
-        assert out[1] is token_only
+    def test_slot_priority_grounds_on_head_token_not_full_phrase(self):
+        # Mirrors rerank's head-token grounding: a post naming the brand head
+        # ("Stripe") lands in the match tier even without the trailing search
+        # descriptor ("payments"), so it is not buried under an unrelated
+        # high-upvote post that never names the brand.
+        head_only = self._titled(1, "Stripe is friendly to 'friendly fraud'", score=5)
+        off_topic = self._titled(2, "PayPal raises dispute fees again", score=900)
+        out = reddit_keyless._slot_priority("Stripe payments", [off_topic, head_only])
+        assert out[0] is head_only
+        assert out[1] is off_topic
 
-    def test_intent_modifier_stripped_from_topic(self):
+    def test_intent_modifier_topic_prioritizes_head_token_match(self):
+        # Intent-modifier topics still partition by the brand head token: the
+        # on-entity post wins over a high-upvote post that never names the brand.
         on_topic = self._titled(1, "Hermes Agent v0.13 is great", score=1)
-        off_topic = self._titled(2, "Hermes Birkin unboxing", score=900)
+        off_topic = self._titled(2, "LangGraph tutorial walkthrough", score=900)
         out = reddit_keyless._slot_priority("Hermes Agent review", [off_topic, on_topic])
         assert out[0] is on_topic
 

@@ -13,12 +13,17 @@ the caller's requested count.
 from __future__ import annotations
 
 import re
-import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from . import dates, grounding
+from . import dates, grounding, log
 from .resolve import _has_backend
+
+# Peer cap vs total vs-entity cap (main + peers).
+COMPETITORS_MIN = 1
+COMPETITORS_MAX = 6
+COMPETITORS_DEFAULT = 2
+COMPARISON_ENTITY_MAX = COMPETITORS_MAX + 1
 
 # A "brand-shaped" token starts with uppercase OR is camelCase with an
 # uppercase letter later. Catches "Anthropic", "OpenAI", "xAI", "iPhone",
@@ -62,7 +67,7 @@ _STOPWORD_TOKENS: frozenset[str] = frozenset(
 
 
 def _log(msg: str) -> None:
-    print(f"[Competitors] {msg}", file=sys.stderr)
+    log.source_log("Competitors", msg, tty_only=False)
 
 
 def _topic_tokens(topic: str) -> set[str]:
