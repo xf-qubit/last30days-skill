@@ -26,10 +26,24 @@ def _make_api_response(tweets=None, users=None):
 
 
 class TestIsAvailable(unittest.TestCase):
-    def test_returns_true_when_xurl_authenticated(self):
-        completed = mock.Mock(returncode=0, stdout='{"username": "testuser"}')
-        with mock.patch("subprocess.run", return_value=completed):
+    def test_returns_true_when_bearer_configured(self):
+        completed = mock.Mock(
+            returncode=0,
+            stdout="oauth1: ✗\nbearer: ✓\n",
+        )
+        with mock.patch("subprocess.run", return_value=completed) as run_mock:
             self.assertTrue(xurl_x.is_available())
+        call_args = run_mock.call_args[0][0]
+        self.assertEqual(call_args[:3], ["xurl", "auth", "status"])
+
+    def test_returns_false_when_oauth1_only(self):
+        # OAuth1 alone cannot satisfy search_x's --auth app requirement.
+        completed = mock.Mock(
+            returncode=0,
+            stdout="oauth1: ✓\nbearer: ✗\n",
+        )
+        with mock.patch("subprocess.run", return_value=completed):
+            self.assertFalse(xurl_x.is_available())
 
     def test_returns_false_when_not_authenticated(self):
         completed = mock.Mock(returncode=1, stdout="")
@@ -52,9 +66,9 @@ class TestIsAvailable(unittest.TestCase):
         with mock.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("xurl", 10)):
             self.assertFalse(xurl_x.is_available())
 
-    def test_returns_false_when_no_username_in_output(self):
-        # returncode=0 but output does not contain '"username"'
-        completed = mock.Mock(returncode=0, stdout='{"id": "123"}')
+    def test_returns_false_when_no_bearer_marker(self):
+        # returncode=0 but status output has no bearer: ✓
+        completed = mock.Mock(returncode=0, stdout="oauth1: ✗\nbearer: ✗\n")
         with mock.patch("subprocess.run", return_value=completed):
             self.assertFalse(xurl_x.is_available())
 

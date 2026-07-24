@@ -5,8 +5,8 @@ xurl is X's official CLI for the X API
 X Developer App. No xAI subscription or browser cookies needed.
 
 Install: npm install -g @xdevplatform/xurl
-Auth:    xurl auth app-only <bearer-token>   (search)
-         xurl auth oauth1 ...                (whoami / availability check)
+Auth:    xurl auth app-only <bearer-token>   (search / availability)
+         xurl auth oauth1 ...                (optional; not used for search)
 
 Priority: xAI API > Bird/GraphQL > xurl > web-only fallback
 """
@@ -18,6 +18,11 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from .relevance import token_overlap_relevance as _compute_relevance
+
+# xurl auth status marks a configured app-only bearer as "bearer: ✓".
+# Search uses --auth app, so availability must require this — oauth1 alone
+# is not enough.
+_BEARER_CONFIGURED_RE = re.compile(r"bearer:\s*✓")
 
 
 def _log(msg: str) -> None:
@@ -34,19 +39,23 @@ DEPTH_CONFIG = {
 
 
 def is_available() -> bool:
-    """Check if xurl is installed and has valid authentication.
+    """Check if xurl is installed and has app-only bearer auth.
 
-    Returns True only if xurl binary is found AND the user is authenticated
-    (i.e. ``xurl whoami`` exits 0 and returns a username field).
+    Returns True only if xurl binary is found AND ``xurl auth status``
+    exits 0 with a configured app-only bearer (``bearer: ✓``). OAuth1
+    alone is insufficient — ``search_x`` pins ``--auth app``.
     """
     try:
         result = subprocess.run(
-            ["xurl", "whoami"],
+            ["xurl", "auth", "status"],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        return result.returncode == 0 and '"username"' in result.stdout
+        return (
+            result.returncode == 0
+            and _BEARER_CONFIGURED_RE.search(result.stdout) is not None
+        )
     except (OSError, subprocess.TimeoutExpired):
         # OSError covers FileNotFoundError (no xurl on PATH) and
         # PermissionError (a non-executable match on PATH, e.g. WSL's
