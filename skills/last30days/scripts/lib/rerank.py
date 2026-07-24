@@ -7,7 +7,7 @@ import math
 import re
 from datetime import datetime
 
-from . import http, providers, schema, signals
+from . import http, providers, relevance, schema, signals
 
 
 # Penalty applied when a candidate does not mention the primary entity
@@ -18,6 +18,13 @@ from . import http, providers, schema, signals
 # Nate Herk "Managed Agents" video scored 51 / ranked #2 with zero
 # Hermes content.
 ENTITY_MISS_PENALTY = 25.0
+
+# A fallback entity miss is hidden from synthesized evidence only when it also
+# lacks every stable raw-topic anchor. Explicitly scoped sources such as GitHub
+# project mode carry a high local-relevance floor and therefore escape this
+# visibility gate even when their short title omits the user's wording.
+FALLBACK_ENTITY_MISS_CONFIDENCE_ESCAPE = 0.5
+_FALLBACK_ENTITY_MISS_EXPLANATION = "fallback-local-score (entity-miss demotion)"
 
 # Small additive credit for a post authored by one of the run's resolved
 # handles (see rerank_candidates / _fallback_tuple). Deliberately small: the
@@ -660,6 +667,36 @@ def _primary_entity(topic: str) -> str:
     # Also collapse multiple spaces and strip punctuation.
     stripped = re.sub(r"\s+", " ", stripped).strip(" \t\r\n?.,:;!")
     return stripped
+
+
+def prune_fallback_entity_misses(
+    candidates: list[schema.Candidate],
+    *,
+    topic: str,
+) -> list[schema.Candidate]:
+    """Hide unanchored, low-confidence fallback misses from visible evidence.
+
+    Broad recommendation queries can be misread as one long primary entity,
+    causing every fallback candidate to receive the entity-miss marker. The
+    marker alone is therefore not a safe filter. A candidate is removed only
+    when it also has no lexical overlap with the stable raw topic and lacks a
+    strong local-relevance signal from an explicitly scoped retrieval path.
+    Source items remain in the report's diagnostic source dump.
+    """
+    if not topic:
+        return candidates
+
+    kept: list[schema.Candidate] = []
+    for candidate in candidates:
+        if candidate.explanation != _FALLBACK_ENTITY_MISS_EXPLANATION:
+            kept.append(candidate)
+            continue
+        if candidate.local_relevance >= FALLBACK_ENTITY_MISS_CONFIDENCE_ESCAPE:
+            kept.append(candidate)
+            continue
+        if relevance.token_overlap_relevance(topic, _candidate_haystack(candidate)) > 0.0:
+            kept.append(candidate)
+    return kept
 
 
 #: Secondary entity-miss penalty applied directly to final_score (not just

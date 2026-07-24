@@ -2410,6 +2410,8 @@ def run(
         shortlist_size=settings["rerank_limit"],
         resolved_handles=resolved_handles,
     )
+    ranked_public = rerank.prune_fallback_entity_misses(ranked_public, topic=topic)
+    ranked_private = rerank.prune_fallback_entity_misses(ranked_private, topic=topic)
     ranked_candidates = sorted(
         [*ranked_public, *ranked_private],
         key=lambda candidate: (

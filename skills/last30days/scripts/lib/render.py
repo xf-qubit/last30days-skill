@@ -337,7 +337,16 @@ def _render_ranked_clusters(
     candidate_by_id = {
         candidate.candidate_id: candidate for candidate in report.ranked_candidates
     }
-    for index, cluster in enumerate(clusters, start=1):
+    solid_clusters = _clusters_clearing_relevance_floor(report, clusters)
+    if clusters and not solid_clusters:
+        lines.extend([
+            "**Nothing solid this window.**",
+            "",
+            "No recent evidence cluster cleared the relevance floor. "
+            "Do not infer findings or quote community comments from this run.",
+            "",
+        ])
+    for index, cluster in enumerate(solid_clusters, start=1):
         lines.append(
             f"### {index}. {cluster.title} "
             f"(score {cluster.score:.0f}, {len(cluster.candidate_ids)} "
@@ -353,6 +362,47 @@ def _render_ranked_clusters(
             lines.extend(_render_candidate(candidate, prefix=f"{rep_index}.", report=report))
         lines.append("")
     return lines
+
+
+def _clusters_clearing_relevance_floor(
+    report: schema.Report,
+    clusters: list[schema.Cluster],
+) -> list[schema.Cluster]:
+    """Return visible clusters with positive, non-entity-miss evidence.
+
+    A zero-score cluster is diagnostic retrieval residue rather than evidence.
+    Likewise, a positive cluster whose known representatives are all explicitly
+    entity-miss-demoted must not be promoted by engagement into the synthesis.
+    Missing representative records are not treated as a miss: score remains the
+    only signal available in that defensive edge case.
+    """
+    candidate_by_id = {
+        candidate.candidate_id: candidate for candidate in report.ranked_candidates
+    }
+    solid: list[schema.Cluster] = []
+    for cluster in clusters:
+        if cluster.score <= 0:
+            continue
+        representatives = [
+            candidate_by_id[candidate_id]
+            for candidate_id in cluster.representative_ids
+            if candidate_id in candidate_by_id
+        ]
+        if representatives and all(
+            "entity-miss" in (candidate.explanation or "").lower()
+            for candidate in representatives
+        ):
+            continue
+        solid.append(cluster)
+    return solid
+
+
+def _visible_clusters_fail_relevance_floor(
+    report: schema.Report,
+    clusters: list[schema.Cluster],
+) -> bool:
+    """Whether a non-empty visible cluster set contains no usable evidence."""
+    return bool(clusters) and not _clusters_clearing_relevance_floor(report, clusters)
 
 
 def _render_corpus_section(report: schema.Report, limit: int = 8) -> list[str]:
@@ -473,35 +523,44 @@ def _render_registered_sections(
 ) -> list[str]:
     """Render one audience preset's ordered, budgeted evidence sections."""
 
-    best_takes = _render_best_takes(
-        report.ranked_candidates,
-        limit=audience.budget_for("best_takes", int(fun_params["limit"])),
-        threshold=float(fun_params["threshold"]),
-        vote_weight=float(fun_params.get("vote_weight", 18.0)),
-        # The preset's source emphasis must reach the lead section's own
-        # ranking: a creator register surfaces TikTok/IG/YouTube takes ahead
-        # of equally-rated HN or GitHub ones.
-        source_weight=(audience.emphasis_for if audience.emphasis_weights else None),
-    )
-    if not best_takes:
-        best_takes = ["## Best Takes", "", "- No qualifying takes surfaced in this run."]
-
-    top_comments = _render_top_comments(
+    visible_clusters = _clusters_for_register(report, audience, cluster_limit)
+    no_solid_evidence = _visible_clusters_fail_relevance_floor(
         report,
-        limit=audience.budget_for("top_comments", 8),
+        visible_clusters,
     )
-    if not top_comments:
-        top_comments = [
-            "## Top Community Comments",
-            "",
-            "- No qualifying community comments surfaced in this run.",
-        ]
+    if no_solid_evidence:
+        best_takes: list[str] = []
+        top_comments: list[str] = []
+    else:
+        best_takes = _render_best_takes(
+            report.ranked_candidates,
+            limit=audience.budget_for("best_takes", int(fun_params["limit"])),
+            threshold=float(fun_params["threshold"]),
+            vote_weight=float(fun_params.get("vote_weight", 18.0)),
+            # The preset's source emphasis must reach the lead section's own
+            # ranking: a creator register surfaces TikTok/IG/YouTube takes ahead
+            # of equally-rated HN or GitHub ones.
+            source_weight=(audience.emphasis_for if audience.emphasis_weights else None),
+        )
+        if not best_takes:
+            best_takes = ["## Best Takes", "", "- No qualifying takes surfaced in this run."]
+
+        top_comments = _render_top_comments(
+            report,
+            limit=audience.budget_for("top_comments", 8),
+        )
+        if not top_comments:
+            top_comments = [
+                "## Top Community Comments",
+                "",
+                "- No qualifying community comments surfaced in this run.",
+            ]
 
     sections = {
-        "hiring_signals": _render_hiring_signals(report),
+        "hiring_signals": [] if no_solid_evidence else _render_hiring_signals(report),
         "clusters": _render_ranked_clusters(
             report,
-            _clusters_for_register(report, audience, cluster_limit),
+            visible_clusters,
         ),
         "stats": _render_stats(report),
         "best_takes": best_takes,
@@ -582,7 +641,16 @@ def render_compact(
     # block below) vs "synthesize from" (this block).
     lines.append("<!-- EVIDENCE FOR SYNTHESIS: read this, do not emit verbatim. Transform into `What I learned:` prose per LAW 2. -->")
     lines.append("")
-    hiring_block = _render_hiring_signals(evidence_report)
+    visible_clusters = evidence_report.clusters[:cluster_limit]
+    no_solid_evidence = _visible_clusters_fail_relevance_floor(
+        evidence_report,
+        visible_clusters,
+    )
+    hiring_block = (
+        []
+        if no_solid_evidence
+        else _render_hiring_signals(evidence_report)
+    )
     if hiring_block and audience.name in {"default", "eli5"}:
         lines.extend(hiring_block)
         lines.append("")
@@ -590,21 +658,22 @@ def render_compact(
     if audience.name in {"default", "eli5"}:
         # Keep this legacy assembly byte-for-byte stable. ELI5 has always been
         # a synthesis-only voice change, so it intentionally takes this path.
-        lines.extend(_render_ranked_clusters(evidence_report, evidence_report.clusters[:cluster_limit]))
+        lines.extend(_render_ranked_clusters(evidence_report, visible_clusters))
         lines.extend(_render_stats(evidence_report))
 
-        best_takes = _render_best_takes(
-            evidence_report.ranked_candidates,
-            limit=fun_params["limit"],
-            threshold=fun_params["threshold"],
-            vote_weight=fun_params.get("vote_weight", 18.0),
-        )
-        if best_takes:
-            lines.extend([""] + best_takes)
+        if not no_solid_evidence:
+            best_takes = _render_best_takes(
+                evidence_report.ranked_candidates,
+                limit=fun_params["limit"],
+                threshold=fun_params["threshold"],
+                vote_weight=fun_params.get("vote_weight", 18.0),
+            )
+            if best_takes:
+                lines.extend([""] + best_takes)
 
-        top_comments = _render_top_comments(evidence_report)
-        if top_comments:
-            lines.extend([""] + top_comments)
+            top_comments = _render_top_comments(evidence_report)
+            if top_comments:
+                lines.extend([""] + top_comments)
 
         outcome_note = _render_source_outcome_note(report)
         if outcome_note:
@@ -2723,6 +2792,8 @@ def _render_top_comments(report, limit: int = 8) -> list[str]:
     seen: set[str] = set()
     scored: list[tuple[float, schema.Candidate, schema.SourceItem, dict, str]] = []
     for cand in report.ranked_candidates:
+        if not _best_take_relevance_ok(cand):
+            continue
         for item in cand.source_items:
             # Pass min_score=0 here: the cross-platform list deliberately does
             # NOT gate on the per-platform absolute floor, because a less-watched

@@ -277,6 +277,89 @@ class EntityGroundingTests(unittest.TestCase):
         self.assertNotIn("Primary entity grounding", prompt)
 
 
+class FallbackVisibilityTests(unittest.TestCase):
+    """Only low-confidence fallback entity misses with no raw-topic anchor are
+    hidden from synthesized evidence; adjacent and explicitly scoped evidence
+    remains available."""
+
+    topic = (
+        "best durable execution architecture for AI coding agents and "
+        "alternatives to Temporal"
+    )
+
+    def _candidate(
+        self,
+        *,
+        title: str,
+        snippet: str,
+        local_relevance: float,
+        explanation: str,
+        source: str = "youtube",
+    ) -> schema.Candidate:
+        candidate = schema.Candidate(
+            candidate_id=f"{source}-{title[:18]}",
+            item_id="i1",
+            source=source,
+            title=title,
+            url="https://example.com/item",
+            snippet=snippet,
+            subquery_labels=["primary"],
+            native_ranks={f"primary:{source}": 1},
+            local_relevance=local_relevance,
+            freshness=80,
+            engagement=50,
+            source_quality=0.7,
+            rrf_score=0.02,
+        )
+        candidate.explanation = explanation
+        candidate.final_score = 14.0
+        return candidate
+
+    def test_prunes_only_unanchored_low_confidence_fallback_entity_miss(self):
+        starship = self._candidate(
+            title=(
+                "Everyone Mocked the Boy, Until He Awakened a Starship System "
+                "and Built a Powerful Fleet From Scrap!"
+            ),
+            snippet=(
+                "A simulation assessment projected a meteorite shattering the "
+                "ship's hull while classmates laughed."
+            ),
+            local_relevance=0.38,
+            explanation="fallback-local-score (entity-miss demotion)",
+        )
+        adjacent = self._candidate(
+            title="Fable AI coding workflow exhausts weekly API limits",
+            snippet="The system spawns up to 40 subagents simultaneously for execution.",
+            local_relevance=0.31,
+            explanation="fallback-local-score (entity-miss demotion)",
+            source="digg",
+        )
+        scoped_project = self._candidate(
+            title="hatchet-dev/hatchet",
+            snippet="Project repository",
+            local_relevance=0.8,
+            explanation="fallback-local-score (entity-miss demotion)",
+            source="github",
+        )
+        ordinary_fallback = self._candidate(
+            title="Unrelated wording",
+            snippet="No raw topic terms here",
+            local_relevance=0.2,
+            explanation="fallback-local-score",
+        )
+
+        kept = rerank.prune_fallback_entity_misses(
+            [starship, adjacent, scoped_project, ordinary_fallback],
+            topic=self.topic,
+        )
+
+        self.assertNotIn(starship, kept)
+        self.assertIn(adjacent, kept)
+        self.assertIn(scoped_project, kept)
+        self.assertIn(ordinary_fallback, kept)
+
+
 class ExpandedHaystackTests(unittest.TestCase):
     """Unit 3: Entity-grounding haystack covers transcript snippets,
     transcript highlights, top comments, and comment insights - not

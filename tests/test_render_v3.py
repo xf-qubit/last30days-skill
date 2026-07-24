@@ -115,6 +115,52 @@ class RenderV3Tests(unittest.TestCase):
         text = render.render_compact(report)
         self.assertIn("## Source Errors", text)
 
+    def test_failed_x_bookmark_workflow_query_emits_no_solid_floor(self):
+        """Regression: generic token overlap must not turn all-zero X noise
+        into findings or quotable comments for a compound workflow query."""
+        report = sample_report()
+        report.topic = (
+            "AI-assisted X bookmark triage, knowledge capture, "
+            "and safe engagement automation"
+        )
+        report.query_plan.raw_topic = report.topic
+        report.clusters[0].score = 0
+        report.ranked_candidates[0].final_score = 0
+        report.ranked_candidates[0].explanation = (
+            "fallback-local-score (entity-miss demotion)"
+        )
+        report.ranked_candidates[0].source_items[0].metadata["top_comments"] = [
+            {
+                "excerpt": "An unrelated but highly voted comment one.",
+                "score": 500,
+            },
+            {
+                "excerpt": "An unrelated but highly voted comment two.",
+                "score": 400,
+            },
+        ]
+
+        text = render.render_compact(report)
+
+        self.assertIn("**Nothing solid this window.**", text)
+        self.assertNotIn("### 1. Grounded result", text)
+        self.assertNotIn("## Top Community Comments", text)
+        self.assertIn("## Stats", text)
+        self.assertIn("All agents reported back!", text)
+
+    def test_positive_cluster_with_only_entity_miss_representatives_is_rejected(self):
+        report = sample_report()
+        report.clusters[0].score = 30
+        report.ranked_candidates[0].final_score = 30
+        report.ranked_candidates[0].explanation = (
+            "fallback-local-score (entity-miss demotion)"
+        )
+
+        text = render.render_compact(report)
+
+        self.assertIn("**Nothing solid this window.**", text)
+        self.assertNotIn("### 1. Grounded result", text)
+
 
 class OutputEnvelopeTests(unittest.TestCase):
     """LAW 6 envelope comments: scope "pass through verbatim" unambiguously.
@@ -1033,6 +1079,30 @@ class TestRenderTopCommentsBlock(unittest.TestCase):
         text = render.render_compact(report)
         block = text.split("## Top Community Comments", 1)[1]
         self.assertIn("TurkiYe", block)
+
+    def test_excludes_comments_from_entity_miss_candidate_in_mixed_report(self):
+        missed = self._cand(
+            "missed",
+            "reddit",
+            5000,
+            "viral but unrelated entity-miss comment",
+        )
+        missed.final_score = 0
+        missed.explanation = "fallback-local-score (entity-miss demotion)"
+        report = self._report(
+            [
+                missed,
+                self._cand("good-a", "reddit", 100, "first relevant comment here"),
+                self._cand("good-b", "reddit", 90, "second relevant comment here"),
+            ],
+            representative_ids=["good-a"],
+        )
+
+        block = "\n".join(render._render_top_comments(report))
+
+        self.assertNotIn("viral but unrelated", block)
+        self.assertIn("first relevant comment", block)
+        self.assertIn("second relevant comment", block)
 
     def test_block_inside_evidence_envelope(self):
         report = self._report(
