@@ -1196,19 +1196,16 @@ def _render_degraded_run_warning(report: schema.Report) -> list[str]:
 
 
 def _parse_comparison_entities(topic: str) -> list[str] | None:
-    """Return list of entity names if topic is a comparison query, else None.
+    """Return entity names if topic is a comparison query, else None.
 
-    Splits on ` vs ` or ` versus ` (case-insensitive). Caps at 4 entities
-    for table readability. Returns None if only one entity or empty input.
+    Delegates to ``planner._comparison_entities`` so scaffold columns match
+    vs-routing (including `/`, trailing-context strip, and dedup).
     """
     if not topic:
         return None
-    import re
-    parts = re.split(r"\s+(?:vs\.?|versus)\s+", topic.strip(), flags=re.IGNORECASE)
-    parts = [p.strip() for p in parts if p.strip()]
-    if len(parts) < 2:
-        return None
-    return parts[:4]
+    from . import planner
+    entities = planner._comparison_entities(topic)
+    return entities if len(entities) >= 2 else None
 
 
 def _render_comparison_scaffold(topic: str) -> list[str]:

@@ -342,7 +342,11 @@ class IntentModifierBreadthTests(unittest.TestCase):
         self.assertEqual(5, planner._max_subqueries("product"))
 
     def test_max_subqueries_unchanged_for_comparison(self):
-        self.assertEqual(4, planner._max_subqueries("comparison"))
+        from lib import competitors
+        self.assertEqual(
+            competitors.COMPARISON_ENTITY_MAX + 1,
+            planner._max_subqueries("comparison"),
+        )
 
     def test_max_subqueries_unchanged_for_factual_and_concept(self):
         self.assertEqual(2, planner._max_subqueries("factual"))
