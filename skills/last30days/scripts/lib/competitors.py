@@ -19,6 +19,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from . import dates, grounding, log
 from .resolve import _has_backend
 
+# Shared with CLI resolve_competitors_args / vs-mode routing / planner + render
+# comparison entity caps. COMPETITORS_MAX is peer count; a vs-string may name
+# the main topic plus that many peers.
+COMPETITORS_MIN = 1
+COMPETITORS_MAX = 6
+COMPETITORS_DEFAULT = 2
+COMPARISON_ENTITY_MAX = COMPETITORS_MAX + 1
+
 # A "brand-shaped" token starts with uppercase OR is camelCase with an
 # uppercase letter later. Catches "Anthropic", "OpenAI", "xAI", "iPhone",
 # "eBay", "Hugging", "Face".

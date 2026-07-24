@@ -49,7 +49,7 @@ if os.name == "nt":
 SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
-from lib import corpus, dates, discovery_handoff, env, freshness, html_render, http, permission_preflight, pipeline, registers, render, schema, ui
+from lib import competitors as competitors_mod, corpus, dates, discovery_handoff, env, freshness, html_render, http, permission_preflight, pipeline, registers, render, schema, ui
 
 _child_pids: set[int] = set()
 _child_pids_lock = threading.Lock()
@@ -739,7 +739,8 @@ def parse_competitors_plan(raw: str | None) -> dict[str, dict]:
                 f"{sorted(unknown)}; ignoring.\n"
             )
         normalized[entity.strip().lower()] = {
-            k: v for k, v in entry.items() if k in known_fields
+            **{k: v for k, v in entry.items() if k in known_fields},
+            "_name": entity.strip(),
         }
     return normalized
 
@@ -810,16 +811,103 @@ def subrun_kwargs_for(
     }
 
 
-COMPETITORS_MIN = 1
-COMPETITORS_MAX = 6
-COMPETITORS_DEFAULT = 2
+COMPETITORS_MIN = competitors_mod.COMPETITORS_MIN
+COMPETITORS_MAX = competitors_mod.COMPETITORS_MAX
+COMPETITORS_DEFAULT = competitors_mod.COMPETITORS_DEFAULT
+COMPARISON_ENTITY_MAX = competitors_mod.COMPARISON_ENTITY_MAX
+
+
+def truncate_comparison_entities(
+    entities: list[str],
+    *,
+    warn: bool = True,
+    max_entities: int | None = None,
+) -> list[str]:
+    """Cap a vs-entity list; optionally warn on stderr naming dropped entities."""
+    ceiling = COMPARISON_ENTITY_MAX if max_entities is None else max_entities
+    if len(entities) <= ceiling:
+        return list(entities)
+    kept = entities[:ceiling]
+    dropped = entities[ceiling:]
+    if warn:
+        sys.stderr.write(
+            f"[Competitors] vs-topic has {len(entities)} entities; "
+            f"using first {ceiling}, dropped: {', '.join(dropped)}\n"
+        )
+    return kept
+
+
+def apply_vs_competitor_routing(
+    topic: str,
+    *,
+    competitors_flag: int | None,
+    comp_enabled: bool,
+    comp_count: int,
+    comp_explicit: list[str],
+    has_plan: bool,
+    comp_plan: dict[str, dict] | None = None,
+) -> tuple[str, bool, int, list[str]]:
+    """Apply vs-string / plan routing on top of resolve_competitors_args.
+
+    Precedence for *who* runs:
+      1. ``--competitors-list`` (explicit peers; topic unchanged)
+      2. Pure discover-N (``--competitors`` without list or plan) — topic
+         unchanged, even if it contains ``vs``
+      3. vs-string split (first entity becomes main topic) — used for bare
+         vs-topics and vs-topic + ``--competitors-plan``
+      4. ``--competitors-plan`` keys as peers when there is no vs-string
+      5. ``--competitors N`` + plan without vs-string → discover-N
+    """
+    from lib import planner as _planner
+
+    if comp_explicit:
+        return topic, True, len(comp_explicit), list(comp_explicit)
+
+    # Preserve discover-N semantics: numeric flag without plan/list must not
+    # rewrite a vs-string into named peers.
+    if competitors_flag is not None and not has_plan:
+        return topic, True, comp_count, []
+
+    vs_entities = truncate_comparison_entities(
+        _planner._comparison_entities(topic, max_entities=-1),
+        warn=True,
+    )
+    if len(vs_entities) >= 2:
+        main, peers = vs_entities[0], vs_entities[1:]
+        sys.stderr.write(
+            f"[Competitors] vs-mode: routing to N-pass fanout: "
+            f"{main} vs {' vs '.join(peers)}\n"
+        )
+        return main, True, len(peers), peers
+
+    if has_plan and comp_plan:
+        plan_peers = [
+            (entry.get("_name") or key)
+            for key, entry in comp_plan.items()
+            if isinstance(entry, dict)
+        ]
+        plan_peers = [name for name in plan_peers if name]
+        if len(plan_peers) > COMPETITORS_MAX:
+            sys.stderr.write(
+                f"[Competitors] --competitors-plan has {len(plan_peers)} entries, "
+                f"clamping to {COMPETITORS_MAX}.\n"
+            )
+            plan_peers = plan_peers[:COMPETITORS_MAX]
+        return topic, True, len(plan_peers), plan_peers
+
+    if competitors_flag is not None:
+        return topic, True, comp_count, []
+
+    return topic, comp_enabled, comp_count, comp_explicit
 
 
 def resolve_competitors_args(args: argparse.Namespace) -> tuple[bool, int, list[str]]:
-    """Normalize --competitors / --competitors-list into (enabled, count, explicit_list).
+    """Normalize competitors flags into (enabled, count, explicit_list).
 
-    - (False, 0, []) when neither flag is set.
-    - An explicit list always wins; count is derived from list length.
+    - (False, 0, []) when neither flag, list, nor plan is set.
+    - An explicit ``--competitors-list`` always wins; count is derived from list length.
+    - ``--competitors-plan`` alone enables mode with an empty peer list; vs-routing
+      fills peers from the vs-string or plan keys.
     - A numeric count outside [1, 6] is clamped with a stderr warning.
     - count <= 0 (explicit) raises SystemExit(2).
     """
@@ -838,8 +926,9 @@ def resolve_competitors_args(args: argparse.Namespace) -> tuple[bool, int, list[
     competitors_flag = args.competitors
     list_present = bool(explicit_list)
     flag_present = competitors_flag is not None
+    plan_present = bool(getattr(args, "competitors_plan", None))
 
-    if not list_present and not flag_present:
+    if not list_present and not flag_present and not plan_present:
         return False, 0, []
 
     if list_present:
@@ -857,19 +946,22 @@ def resolve_competitors_args(args: argparse.Namespace) -> tuple[bool, int, list[
             count = COMPETITORS_MAX
         return True, count, explicit_list
 
-    # flag_present, no explicit list
-    count = competitors_flag
-    if count < COMPETITORS_MIN:
-        sys.stderr.write(
-            f"[Competitors] --competitors must be >= {COMPETITORS_MIN} (got {count}).\n"
-        )
-        raise SystemExit(2)
-    if count > COMPETITORS_MAX:
-        sys.stderr.write(
-            f"[Competitors] --competitors={count} exceeds max {COMPETITORS_MAX}; clamping.\n"
-        )
-        count = COMPETITORS_MAX
-    return True, count, []
+    if flag_present:
+        count = competitors_flag
+        if count < COMPETITORS_MIN:
+            sys.stderr.write(
+                f"[Competitors] --competitors must be >= {COMPETITORS_MIN} (got {count}).\n"
+            )
+            raise SystemExit(2)
+        if count > COMPETITORS_MAX:
+            sys.stderr.write(
+                f"[Competitors] --competitors={count} exceeds max {COMPETITORS_MAX}; clamping.\n"
+            )
+            count = COMPETITORS_MAX
+        return True, count, []
+
+    # plan_present alone: enable; peers filled by apply_vs_competitor_routing.
+    return True, 0, []
 
 
 def _missing_sources_for_promo(diag: dict[str, object]) -> str | None:
@@ -3085,23 +3177,17 @@ def _main(
             if keywords:
                 config["_polymarket_keywords"] = keywords
 
-        # vs-mode: if the topic string contains " vs " / " versus " and the
-        # planner can split it into >=2 entities, route through the same
-        # N-pass fanout path as --competitors. The first entity becomes the
-        # main topic; remaining entities become the competitor list. User's
-        # outer --x-handle / --subreddits apply to the first entity unless
-        # --competitors-plan covers it.
-        from lib import planner as _planner
-        vs_entities = _planner._comparison_entities(topic)
-        if len(vs_entities) >= 2 and not comp_enabled:
-            topic = vs_entities[0]
-            comp_enabled = True
-            comp_count = len(vs_entities) - 1
-            comp_explicit = vs_entities[1:]
-            sys.stderr.write(
-                f"[Competitors] vs-mode: routing to N-pass fanout: "
-                f"{' vs '.join(vs_entities)}\n"
-            )
+        # vs-mode / plan routing: split a vs-topic into main + peers unless
+        # discover-N or an explicit --competitors-list already decided who runs.
+        topic, comp_enabled, comp_count, comp_explicit = apply_vs_competitor_routing(
+            topic,
+            competitors_flag=args.competitors,
+            comp_enabled=comp_enabled,
+            comp_count=comp_count,
+            comp_explicit=comp_explicit,
+            has_plan=bool(comp_plan),
+            comp_plan=comp_plan,
+        )
 
         # Dedicated subs ride the config dict (already threaded to every source
         # fetch) so the keyless Reddit path can pull them floor-exempt without
