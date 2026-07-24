@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - YouTube transcript fetches now reuse a completed VTT left on disk when yt-dlp times out, honor `.env` values for caption languages, and allow keyed runs to tune the 12-second fast-fail timeout.
+- Comparison / vs-mode no longer silently drops entities beyond 4. Entity ceiling is now `COMPETITORS_MAX + 1` (7), truncation warns on stderr naming dropped entities, and `--competitors-plan` implies competitor mode so a vs-topic + plan keeps all named peers (plan remains targeting-only; discover-N via bare `--competitors` is unchanged) ([#868](https://github.com/mvanhorn/last30days-skill/issues/868)).
+- Docs now match Reddit ScrapeCreators search backup semantics: empty-only by default (not "when public Reddit is unavailable" / rate-limited). `CONFIGURATION.md` documents `LAST30DAYS_REDDIT_SC_MIN_ITEMS`; `SKILL.md` Security, Manual setup, NUX, and the Reddit backend pin describe the real empty-path / thinness-floor / SC-primary knobs. NUX Step 4/5 no longer claim SC Reddit comment enrichment or `public + ScrapeCreators` merge on the default free path (comments stay keyless via shreddit) ([#867](https://github.com/mvanhorn/last30days-skill/issues/867)).
 
 ## [3.18.0] - 2026-07-21
 

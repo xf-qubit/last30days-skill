@@ -88,7 +88,7 @@ Both share the same consent points:
 
 1. **Browser cookies** - the model asks before reading anything. On yes it runs `setup --allow-browser-cookies`, which extracts Firefox/Safari cookies (never Chrome unless `FROM_BROWSER=auto` or a named Chromium browser is explicitly configured) to unlock X/Twitter and other logged-in sources, and installs yt-dlp + the keyless Digg CLI. On no it runs setup without `--allow-browser-cookies` (or with `FROM_BROWSER=off`), which skips all cookie reads and still installs the tools.
 2. **Full Disk Access (macOS)** - if a cookie read is permission-denied, the model surfaces the System Settings > Privacy & Security > Full Disk Access fix and offers one retry.
-3. **ScrapeCreators GitHub signup** - offered on every first run (10,000 free calls). On consent it runs `setup --github`, which opens a browser for GitHub device-auth (or registers instantly via the `gh` CLI when installed) and, on success, **persists `SCRAPECREATORS_API_KEY` automatically** (0o600, masked in output) so TikTok, Instagram, and the SC Reddit/YouTube backups activate on the next run. Decline anytime; you can run it later by asking to set up ScrapeCreators. The Step 5 opt-in has two tiers, both comment-enabled: **Recommended** (TikTok + Instagram posts AND top comments, plus YouTube comments — `INCLUDE_SOURCES=tiktok,instagram,youtube_comments,tiktok_comments,instagram_comments`) and **Everything**, which also adds Threads + Pinterest. Comments are on by default; Threads and Pinterest are the only opt-in extras.
+3. **ScrapeCreators GitHub signup** - offered on every first run (10,000 free calls). On consent it runs `setup --github`, which opens a browser for GitHub device-auth (or registers instantly via the `gh` CLI when installed) and, on success, **persists `SCRAPECREATORS_API_KEY` automatically** (0o600, masked in output) so TikTok, Instagram, empty-path Reddit search backup, and the YouTube transcript fallback activate on the next run. Decline anytime; you can run it later by asking to set up ScrapeCreators. The Step 5 opt-in has two tiers, both comment-enabled: **Recommended** (TikTok + Instagram posts AND top comments, plus YouTube comments — `INCLUDE_SOURCES=tiktok,instagram,youtube_comments,tiktok_comments,instagram_comments`) and **Everything**, which also adds Threads + Pinterest. Comments are on by default; Threads and Pinterest are the only opt-in extras.
 
 Re-run onboarding by deleting `~/.config/last30days/.env`. The mechanical work lives in `scripts/lib/setup_wizard.py`; the consent conversation and both host flows are specified in `skills/last30days/SKILL.md` Step 0. The original v3.0.0 wizard is captured at `docs/reference/old-nux-wizard-v3.0.0.md`.
 
@@ -131,7 +131,7 @@ python3 skills/last30days/scripts/last30days.py "MCP servers" \
 | Source | Key(s) | Required for | Free tier |
 |---|---|---|---|
 | Local corpus | `--corpus <dir>` or `LAST30DAYS_CORPUS_DIRS` | private `.md`/`.txt`; `.pdf` when `pdftotext` is on PATH | yes (offline) |
-| Reddit (public) | none (default); `SCRAPECREATORS_API_KEY` + `LAST30DAYS_REDDIT_BACKEND=scrapecreators` to pin SC primary with public fallback | always on; SC pin requires `SCRAPECREATORS_API_KEY` | yes |
+| Reddit (public) | none (default free keyless path). With `SCRAPECREATORS_API_KEY`: empty-only search backup by default; `LAST30DAYS_REDDIT_SC_MIN_ITEMS=<N>` backfills thin free runs; `LAST30DAYS_REDDIT_BACKEND=scrapecreators` pins SC primary with free fallback | always on; SC knobs require `SCRAPECREATORS_API_KEY` | yes |
 | Hacker News | none | always on | yes |
 | Polymarket | none | always on | yes |
 | StockTwits | none | auto-on for ticker/crypto topics only (gated by symbol detection); never registered for non-financial topics | yes (public API, ~200 req/hr per IP) |
@@ -416,6 +416,7 @@ Every live run writes its JSON result to `~/.config/last30days/doctor-cache.json
 | `LAST30DAYS_DOCTOR_PROBE_TIMEOUT` | Per-source deadline (**seconds**) for `doctor --probe` live checks. Defaults to `10`. Caps each concurrent probe so a slow source cannot hang the command. |
 | `LAST30DAYS_X_BACKEND` | Pins the X backend (`xai` / `bird` / `xurl` / `xquik`); doctor renders the pin and predicts "will use" accordingly. |
 | `LAST30DAYS_REDDIT_BACKEND` | `scrapecreators` makes ScrapeCreators the primary Reddit backend; doctor renders Reddit's conditional routing with the pin applied. |
+| `LAST30DAYS_REDDIT_SC_MIN_ITEMS` | Integer thinness floor for ScrapeCreators Reddit **search** backfill. Default `0` = empty-only (free path keeps any non-empty result; no credit spend). Set above `0` to backfill when free yield is below that count; merged results dedupe by post id. Requires `SCRAPECREATORS_API_KEY`. Ignored when `LAST30DAYS_REDDIT_BACKEND=scrapecreators` (SC is already primary). |
 
 Web search has **no** env pin — pin it per-run with `--web-backend=<name>` only (see [Web search backend priority](#web-search-backend-priority)).
 
