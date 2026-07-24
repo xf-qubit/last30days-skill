@@ -355,7 +355,20 @@ def _render_ranked_clusters(
         )
         if cluster.uncertainty:
             lines.append(f"- Uncertainty: {cluster.uncertainty}")
-        for rep_index, candidate_id in enumerate(cluster.representative_ids, start=1):
+        representative_ids = [
+            candidate_id
+            for candidate_id in cluster.representative_ids
+            if candidate_id in candidate_by_id
+            and _best_take_relevance_ok(candidate_by_id[candidate_id])
+        ]
+        if not representative_ids:
+            representative_ids = [
+                candidate_id
+                for candidate_id in cluster.candidate_ids
+                if candidate_id in candidate_by_id
+                and _best_take_relevance_ok(candidate_by_id[candidate_id])
+            ][:1]
+        for rep_index, candidate_id in enumerate(representative_ids, start=1):
             candidate = candidate_by_id.get(candidate_id)
             if not candidate:
                 continue
@@ -371,10 +384,11 @@ def _clusters_clearing_relevance_floor(
     """Return visible clusters with positive, non-entity-miss evidence.
 
     A zero-score cluster is diagnostic retrieval residue rather than evidence.
-    Likewise, a positive cluster whose known representatives are all explicitly
-    entity-miss-demoted must not be promoted by engagement into the synthesis.
-    Missing representative records are not treated as a miss: score remains the
-    only signal available in that defensive edge case.
+    Likewise, a positive cluster with known members but no qualifying member
+    must not be promoted by engagement into the synthesis. Every cluster member
+    is considered because MMR representatives can omit valid evidence. Missing
+    member records are not treated as misses: score remains the only signal
+    available when no member record is present.
     """
     candidate_by_id = {
         candidate.candidate_id: candidate for candidate in report.ranked_candidates
@@ -383,15 +397,12 @@ def _clusters_clearing_relevance_floor(
     for cluster in clusters:
         if cluster.score <= 0:
             continue
-        representatives = [
+        members = [
             candidate_by_id[candidate_id]
-            for candidate_id in cluster.representative_ids
+            for candidate_id in cluster.candidate_ids
             if candidate_id in candidate_by_id
         ]
-        if representatives and all(
-            "entity-miss" in (candidate.explanation or "").lower()
-            for candidate in representatives
-        ):
+        if members and not any(_best_take_relevance_ok(candidate) for candidate in members):
             continue
         solid.append(cluster)
     return solid

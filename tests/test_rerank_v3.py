@@ -348,13 +348,40 @@ class FallbackVisibilityTests(unittest.TestCase):
             local_relevance=0.2,
             explanation="fallback-local-score",
         )
+        incidental_metadata = self._candidate(
+            title="A completely unrelated film discussion",
+            snippet="No connection to the requested workflow.",
+            local_relevance=0.38,
+            explanation="fallback-local-score (entity-miss demotion)",
+            source="reddit",
+        )
+        incidental_metadata.metadata = {
+            "transcript_snippet": "One speaker briefly says agents.",
+            "top_comments": [{"excerpt": "Execution was the best part."}],
+        }
+        generic_title = self._candidate(
+            title="Best starship story this month",
+            snippet="A boy builds a fleet from scrap.",
+            local_relevance=0.38,
+            explanation="fallback-local-score (entity-miss demotion)",
+            source="x",
+        )
 
         kept = rerank.prune_fallback_entity_misses(
-            [starship, adjacent, scoped_project, ordinary_fallback],
+            [
+                starship,
+                adjacent,
+                scoped_project,
+                ordinary_fallback,
+                incidental_metadata,
+                generic_title,
+            ],
             topic=self.topic,
         )
 
         self.assertNotIn(starship, kept)
+        self.assertNotIn(incidental_metadata, kept)
+        self.assertNotIn(generic_title, kept)
         self.assertIn(adjacent, kept)
         self.assertIn(scoped_project, kept)
         self.assertIn(ordinary_fallback, kept)

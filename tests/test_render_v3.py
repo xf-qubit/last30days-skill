@@ -1,3 +1,4 @@
+import copy
 import unittest
 
 from lib import render, schema
@@ -160,6 +161,28 @@ class RenderV3Tests(unittest.TestCase):
 
         self.assertIn("**Nothing solid this window.**", text)
         self.assertNotIn("### 1. Grounded result", text)
+
+    def test_qualifying_nonrepresentative_preserves_cluster_and_becomes_visible(self):
+        report = sample_report()
+        missed_representative = report.ranked_candidates[0]
+        missed_representative.final_score = 14
+        missed_representative.explanation = (
+            "fallback-local-score (entity-miss demotion)"
+        )
+        qualifying_member = copy.deepcopy(missed_representative)
+        qualifying_member.candidate_id = "c2"
+        qualifying_member.title = "Solid nonrepresentative evidence"
+        qualifying_member.final_score = 72
+        qualifying_member.explanation = "high-signal result"
+        report.ranked_candidates.append(qualifying_member)
+        report.clusters[0].candidate_ids.append("c2")
+        report.clusters[0].score = 72
+
+        text = render.render_compact(report)
+
+        self.assertNotIn("**Nothing solid this window.**", text)
+        self.assertIn("### 1. Grounded result", text)
+        self.assertIn("Solid nonrepresentative evidence", text)
 
 
 class OutputEnvelopeTests(unittest.TestCase):

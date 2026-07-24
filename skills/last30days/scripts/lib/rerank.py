@@ -24,6 +24,7 @@ ENTITY_MISS_PENALTY = 25.0
 # project mode carry a high local-relevance floor and therefore escape this
 # visibility gate even when their short title omits the user's wording.
 FALLBACK_ENTITY_MISS_CONFIDENCE_ESCAPE = 0.5
+FALLBACK_ENTITY_MISS_TOPIC_ESCAPE = 0.25
 _FALLBACK_ENTITY_MISS_EXPLANATION = "fallback-local-score (entity-miss demotion)"
 
 # Small additive credit for a post authored by one of the run's resolved
@@ -679,9 +680,11 @@ def prune_fallback_entity_misses(
     Broad recommendation queries can be misread as one long primary entity,
     causing every fallback candidate to receive the entity-miss marker. The
     marker alone is therefore not a safe filter. A candidate is removed only
-    when it also has no lexical overlap with the stable raw topic and lacks a
-    strong local-relevance signal from an explicitly scoped retrieval path.
-    Source items remain in the report's diagnostic source dump.
+    when its stable title and snippet do not clear a meaningful raw-topic
+    relevance floor and it lacks a strong local-relevance signal from an
+    explicitly scoped retrieval path. Comments and transcripts are excluded
+    from this escape because incidental words there do not ground the candidate
+    itself. Source items remain in the report's diagnostic source dump.
     """
     if not topic:
         return candidates
@@ -694,7 +697,11 @@ def prune_fallback_entity_misses(
         if candidate.local_relevance >= FALLBACK_ENTITY_MISS_CONFIDENCE_ESCAPE:
             kept.append(candidate)
             continue
-        if relevance.token_overlap_relevance(topic, _candidate_haystack(candidate)) > 0.0:
+        primary_text = f"{candidate.title or ''} {candidate.snippet or ''}"
+        if (
+            relevance.token_overlap_relevance(topic, primary_text)
+            >= FALLBACK_ENTITY_MISS_TOPIC_ESCAPE
+        ):
             kept.append(candidate)
     return kept
 
